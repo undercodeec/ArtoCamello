@@ -21,6 +21,9 @@ import { ExploreJobs } from "./components/dashboard/ExploreJobs";
 import { MyContacts } from "./components/dashboard/MyContacts";
 import { WalletBilling } from "./components/dashboard/WalletBilling";
 import { ProProfileSettings } from "./components/dashboard/ProProfileSettings";
+import { AdminPanel } from "./components/admin/AdminPanel";
+import { AdminClaim } from "./components/admin/AdminClaim";
+import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
 
 export const router = createBrowserRouter([
   {
@@ -85,8 +88,11 @@ export const router = createBrowserRouter([
           { path: "profile", Component: ProProfileSettings },
           { path: "payment-success", Component: PaymentSuccess },
           { path: "payment-failed", Component: PaymentFailed },
+          { path: "transfer/:requestId", Component: TransferPaymentPage },
         ]
-      }
+      },
+      { path: "/admin/claim", Component: AdminClaim },
+      { path: "/admin/*", Component: AdminPanel }
     ]
   }
 ]);

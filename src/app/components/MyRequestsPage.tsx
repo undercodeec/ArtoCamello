@@ -15,7 +15,7 @@ export function MyRequestsPage() {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [cancelModalOpen, setCancelModalOpen] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [quotesMap, setQuotesMap] = useState<Record<string, ReturnType<typeof listQuotesByRequest>>>({});
+  const [quotesMap, setQuotesMap] = useState<Record<string, Awaited<ReturnType<typeof listQuotesByRequest>>>>({});
   const navigate = useNavigate();
   const auth = getCurrentAuth();
 
@@ -114,6 +114,7 @@ export function MyRequestsPage() {
             {requests.map((request) => {
               const StatusIcon = getStatusConfig(request.status).icon;
               const quotes = quotesMap[request.id] || [];
+              const maxProfessionals = request.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
               const hasReview = !!getReviewByRequest(request.id);
               const isExpanded = expandedId === request.id;
 
@@ -146,13 +147,13 @@ export function MyRequestsPage() {
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-sm font-semibold text-gray-700">Presupuestos recibidos:</span>
                           <span className="text-sm font-bold text-[#101828]">
-                            {Math.min(quotes.length, MAX_PROFESSIONALS_PER_REQUEST)} de {MAX_PROFESSIONALS_PER_REQUEST}
+                            {Math.min(quotes.length, maxProfessionals)} de {maxProfessionals}
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2.5">
                           <div
                             className="bg-[#FFCA0C] h-2.5 rounded-full transition-all duration-500"
-                            style={{ width: `${(Math.min(quotes.length, MAX_PROFESSIONALS_PER_REQUEST) / MAX_PROFESSIONALS_PER_REQUEST) * 100}%` }}
+                            style={{ width: `${(Math.min(quotes.length, maxProfessionals) / maxProfessionals) * 100}%` }}
                           ></div>
                         </div>
                       </div>

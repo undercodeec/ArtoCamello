@@ -207,6 +207,7 @@ export function forceAuth(user: User, token: string): void {
 export function logout(): void {
   setAuthState({ isAuthenticated: false, userId: null, role: UserRole.GUEST, email: null, token: null });
   sessionStorage.removeItem('cachedUser');
+  sessionStorage.removeItem('adminSession');
 }
 
 /** Get current auth state */

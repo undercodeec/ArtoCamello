@@ -7,6 +7,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model AuthThrottle {
+  key      String   @id @db.VarChar(64)
+  attempts Int      @default(0)
+  resetsAt DateTime
+
+  @@index([resetsAt])
+}
+
 // ====================================================================
 // Modelos alineados con domain/types.ts
 // ====================================================================
@@ -18,44 +26,67 @@ enum UserRole {
 }
 
 model User {
-  id                  String               @id @default(uuid())
-  email               String               @unique
-  password            String?
-  authProvider        String               @default("local") // "local" o "google"
-  role                UserRole             @default(client)
-  fullName            String
-  phone               String?
-  avatarUrl           String?
-  emailVerified       Boolean              @default(false)
-  verificationToken   String?              @unique
-  createdAt           DateTime             @default(now())
-  
+  id                String   @id @default(uuid())
+  tenantId          String   @default("artocamello")
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  active            Boolean  @default(true)
+  sessionVersion    Int      @default(0)
+  mfaSecret         String?
+  mfaPendingSecret  String?
+  mfaLastCounter    BigInt   @default(-1)
+  mfaRecoveryHashes String[] @default([])
+  mfaFailureCount   Int      @default(0)
+  mfaLockedUntil    DateTime?
+  email             String   @unique
+  password          String?
+  authProvider      String   @default("local") // "local" o "google"
+  role              UserRole @default(client)
+  fullName          String
+  phone             String?
+  avatarUrl         String?
+  emailVerified     Boolean  @default(false)
+  verificationToken String?  @unique
+  createdAt         DateTime @default(now())
+
   // Relaciones uno a uno hacia los perfiles dependiendo del rol
   clientProfile       ClientProfile?
   professionalProfile ProfessionalProfile?
-  
+
   // Relación hacia los ServiceRequests que creó (si es cliente)
-  serviceRequests     ServiceRequest[]
+  serviceRequests ServiceRequest[]
 
   // Relaciones de Reseñas
-  reviewsMade         Review[]             @relation("ClientReviews")
-  reviewsReceived     Review[]             @relation("ProfessionalReviews")
+  reviewsMade        Review[]             @relation("ClientReviews")
+  reviewsReceived    Review[]             @relation("ProfessionalReviews")
+  memberships        TenantMembership[]
+  payments           Payment[]
+  auditActions       AuditLog[]
+  submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
+  reviewedTransfers  TransferSubmission[] @relation("TransferReviewer")
+
+  @@index([tenantId, role, createdAt])
 }
 
 model ClientProfile {
-  id                  String   @id @default(uuid())
-  userId              String   @unique
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id       String @id @default(uuid())
+  tenantId String @default("artocamello")
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   addresses           String[]
   preferredCategories String[]
+
+  @@index([tenantId])
 }
 
 model ProfessionalProfile {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id       String @id @default(uuid())
+  tenantId String @default("artocamello")
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  userId   String @unique
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   businessName    String?
   bio             String   @db.Text
   categories      String[]
@@ -71,9 +102,11 @@ model ProfessionalProfile {
   reviewCount     Int      @default(0)
   verified        Boolean  @default(false)
   completedJobs   Int      @default(0)
-  
-  leadPurchases   LeadPurchase[]
-  quotes          Quote[]
+
+  leadPurchases LeadPurchase[]
+  quotes        Quote[]
+
+  @@index([tenantId, verified])
 }
 
 // ====================================================================
@@ -99,69 +132,80 @@ enum UrgencyLevel {
 }
 
 model ServiceRequest {
-  id              String         @id @default(uuid())
-  clientId        String
-  client          User           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  
+  id       String @id @default(uuid())
+  tenantId String @default("artocamello")
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  clientId String
+  client   User   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
   categorySlug    String
   title           String
-  description     String         @db.Text
+  description     String        @db.Text
   location        String
-  urgency         UrgencyLevel   @default(low)
+  urgency         UrgencyLevel  @default(low)
   preferredDate   DateTime?
-  status          RequestStatus  @default(draft)
+  status          RequestStatus @default(draft)
   contactPhone    String
   contactEmail    String
-  estimatedBudget Float          @default(0) // Presupuesto estimado en USD ingresado por el cliente
-  purchaseCount   Int            @default(0)
-  
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  
-  leadPurchases   LeadPurchase[]
-  quotes          Quote[]
+  estimatedBudget Float         @default(0) // Presupuesto estimado en USD ingresado por el cliente
+  purchaseCount   Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leadPurchases LeadPurchase[]
+  quotes        Quote[]
+
+  @@index([tenantId, status, createdAt])
 }
 
 enum LeadPurchaseStatus {
-  pending    // Intención creada, esperando pago
-  paid       // Pago confirmado, contacto desbloqueado
-  failed     // El pago falló o caducó
+  pending // Intención creada, esperando pago
+  paid // Pago confirmado, contacto desbloqueado
+  failed // El pago falló o caducó
 }
 
 model LeadPurchase {
-  id                     String               @id @default(uuid())
-  requestId              String
-  request                ServiceRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  
-  professionalId         String
-  professional           ProfessionalProfile  @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  
-  costUSD                Float                // Costo final en USD cobrado al profesional
-  status                 LeadPurchaseStatus   @default(pending)
-  
+  id        String         @id @default(uuid())
+  tenantId  String         @default("artocamello")
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  requestId String
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  costUSD Float // Costo final en USD cobrado al profesional
+  status  LeadPurchaseStatus @default(pending)
+
   // PayPhone tracking
-  payphoneTransactionId  String?              // ID de la transacción en PayPhone
-  payphoneClientTxId     String?              @unique // Nuestro ID único enviado a PayPhone (para callback)
-  
-  purchasedAt            DateTime             @default(now())
-  paidAt                 DateTime?            // Cuando se confirmó el pago
-  
+  payphoneTransactionId String? // ID de la transacción en PayPhone
+  payphoneClientTxId    String? @unique // Nuestro ID único enviado a PayPhone (para callback)
+
+  purchasedAt DateTime            @default(now())
+  paidAt      DateTime? // Cuando se confirmó el pago
+  allocations PaymentAllocation[]
+
   @@unique([requestId, professionalId])
+  @@index([tenantId, status, purchasedAt])
 }
 
 model Review {
-  id              String   @id @default(uuid())
-  rating          Int
-  comment         String   @db.Text
-  createdAt       DateTime @default(now())
-  
-  clientId        String
-  client          User     @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
-  
-  professionalId  String
-  professional    User     @relation("ProfessionalReviews", fields: [professionalId], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  tenantId  String   @default("artocamello")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  rating    Int
+  comment   String   @db.Text
+  createdAt DateTime @default(now())
+
+  clientId String
+  client   User   @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   User   @relation("ProfessionalReviews", fields: [professionalId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
+  @@index([tenantId, professionalId])
 }
 
 // ====================================================================
@@ -175,18 +219,230 @@ enum QuoteStatus {
 }
 
 model Quote {
-  id              String         @id @default(uuid())
-  requestId       String
-  request         ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  
-  professionalId  String
-  professional    ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
-  
-  message         String         @db.Text
-  estimatedPrice  Float
-  estimatedDays   Int?
-  status          QuoteStatus    @default(sent)
-  createdAt       DateTime       @default(now())
-  
+  id        String         @id @default(uuid())
+  tenantId  String         @default("artocamello")
+  tenant    Tenant         @relation(fields: [tenantId], references: [id])
+  requestId String
+  request   ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  message        String      @db.Text
+  estimatedPrice Float
+  estimatedDays  Int?
+  status         QuoteStatus @default(sent)
+  createdAt      DateTime    @default(now())
+
   @@unique([requestId, professionalId])
+  @@index([tenantId, createdAt])
+}
+
+model Tenant {
+  id                   String                @id
+  slug                 String                @unique
+  name                 String
+  status               String                @default("active")
+  settings             Json                  @default("{}")
+  createdAt            DateTime              @default(now())
+  domains              TenantDomain[]
+  users                User[]
+  clientProfiles       ClientProfile[]
+  professionalProfiles ProfessionalProfile[]
+  reviews              Review[]
+  requests             ServiceRequest[]
+  purchases            LeadPurchase[]
+  quotes               Quote[]
+  memberships          TenantMembership[]
+  roles                AdminRole[]
+  auditLogs            AuditLog[]
+  payments             Payment[]
+  files                StoredFile[]
+  allocations          PaymentAllocation[]
+  events               PaymentEvent[]
+}
+
+model TenantDomain {
+  id        String  @id @default(uuid())
+  tenantId  String
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
+  hostname  String  @unique
+  isPrimary Boolean @default(false)
+
+  @@index([tenantId])
+}
+
+model TenantMembership {
+  id         String    @id @default(uuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  roleId     String
+  role       AdminRole @relation(fields: [roleId], references: [id])
+  status     String    @default("active")
+  invitedAt  DateTime  @default(now())
+  acceptedAt DateTime?
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, status])
+}
+
+model AdminRole {
+  id          String             @id @default(uuid())
+  tenantId    String?
+  tenant      Tenant?            @relation(fields: [tenantId], references: [id])
+  code        String
+  name        String
+  isSystem    Boolean            @default(false)
+  memberships TenantMembership[]
+  permissions RolePermission[]
+
+  @@unique([tenantId, code])
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  resource    String
+  action      String
+  description String
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  role         AdminRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+enum PaymentMethod {
+  transfer
+  payphone
+  card
+}
+
+enum PaymentStatus {
+  created
+  awaiting_transfer
+  under_review
+  approved
+  rejected
+  pending_provider
+  failed
+  expired
+  allocated
+}
+
+model Payment {
+  id                String               @id @default(uuid())
+  tenantId          String
+  tenant            Tenant               @relation(fields: [tenantId], references: [id])
+  payerUserId       String
+  payer             User                 @relation(fields: [payerUserId], references: [id])
+  amount            Decimal              @db.Decimal(12, 2)
+  currency          String               @default("USD")
+  method            PaymentMethod
+  status            PaymentStatus        @default(created)
+  reference         String
+  provider          String?
+  providerPaymentId String?
+  metadata          Json                 @default("{}")
+  createdAt         DateTime             @default(now())
+  confirmedAt       DateTime?
+  expiresAt         DateTime?
+  allocations       PaymentAllocation[]
+  transfers         TransferSubmission[]
+  events            PaymentEvent[]
+
+  @@unique([tenantId, reference])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, payerUserId, createdAt])
+}
+
+model PaymentAllocation {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  paymentId      String       @unique
+  payment        Payment      @relation(fields: [paymentId], references: [id])
+  leadPurchaseId String       @unique
+  leadPurchase   LeadPurchase @relation(fields: [leadPurchaseId], references: [id])
+  subjectType    String       @default("lead_purchase")
+  subjectId      String
+  amount         Decimal      @db.Decimal(12, 2)
+
+  @@index([tenantId, subjectType, subjectId])
+}
+
+model StoredFile {
+  id         String               @id @default(uuid())
+  tenantId   String
+  tenant     Tenant               @relation(fields: [tenantId], references: [id])
+  storageKey String               @unique
+  mimeType   String
+  size       Int
+  checksum   String
+  createdBy  String
+  createdAt  DateTime             @default(now())
+  transfers  TransferSubmission[]
+
+  @@index([tenantId, checksum])
+}
+
+model TransferSubmission {
+  id                String     @id @default(uuid())
+  paymentId         String
+  payment           Payment    @relation(fields: [paymentId], references: [id])
+  bankName          String
+  declaredAmount    Decimal?   @db.Decimal(12, 2)
+  accountLast4      String?
+  transferReference String
+  transferredAt     DateTime
+  proofFileId       String
+  proofFile         StoredFile @relation(fields: [proofFileId], references: [id])
+  submittedBy       String
+  submitter         User       @relation("TransferSubmitter", fields: [submittedBy], references: [id])
+  reviewedBy        String?
+  reviewer          User?      @relation("TransferReviewer", fields: [reviewedBy], references: [id])
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime   @default(now())
+
+  @@index([paymentId, createdAt])
+}
+
+model PaymentEvent {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  paymentId      String
+  payment        Payment  @relation(fields: [paymentId], references: [id])
+  type           String
+  source         String
+  payload        Json     @default("{}")
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, paymentId, createdAt])
 }

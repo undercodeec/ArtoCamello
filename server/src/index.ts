@@ -7,33 +7,51 @@ import { OAuth2Client } from 'google-auth-library';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { adminRouter } from './admin';
+import { adminMfaRouter } from './adminMfaRouter';
+import { validateMfaConfig } from './adminMfa';
+import { transferRouter } from './transfers';
+import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl } from './payments';
+import { platformRouter } from './platform';
+import { PayPhoneProvider } from './payphoneProvider';
+import { kushkiWebhookRouter } from './kushkiWebhook';
+import { clearAuthAttempt, consumeAuthAttempt, pruneAuthAttempts } from './authThrottle';
 
 dotenv.config();
 
 const prisma = new PrismaClient();
 const app = express();
+const trustedProxyCidrs = (process.env.TRUST_PROXY_CIDRS || '').split(',').map(value => value.trim()).filter(Boolean);
+if (trustedProxyCidrs.length) app.set('trust proxy', trustedProxyCidrs);
 const port = process.env.PORT || 3000;
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) throw new Error('JWT_SECRET de al menos 32 caracteres requerido');
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-change-me';
+validateMfaConfig(JWT_SECRET);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy-google-client-id';
 
 // ---- PayPhone config ----
 const PAYPHONE_TOKEN = process.env.PAYPHONE_TOKEN || '';
 const PAYPHONE_STORE_ID = process.env.PAYPHONE_STORE_ID || '';
-const PAYPHONE_BASE_URL = process.env.PAYPHONE_BASE_URL || 'https://pay.payfphone.com';
+const PAYPHONE_BASE_URL = process.env.PAYPHONE_BASE_URL || 'https://pay.payphonetodoesposible.com';
 const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
-
-// ---- Business config ----
-const LEAD_FEE_RATE = parseFloat(process.env.LEAD_FEE_RATE || '0.06');
-const LEAD_MIN_COST_USD = parseFloat(process.env.LEAD_MIN_COST_USD || '3');
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 app.use(cors({
-  origin: ['https://artocamello.com', 'https://www.artocamello.com', 'http://localhost:5173'],
+  origin: (origin, callback) => {
+    if (!origin) { callback(null, true); return; }
+    try {
+      const url = new URL(origin);
+      if (url.protocol === 'http:' && url.hostname === 'localhost' && url.port === '5173') { callback(null, true); return; }
+      if (url.protocol !== 'https:') { callback(null, false); return; }
+      prisma.tenantDomain.findUnique({ where: { hostname: url.hostname.toLowerCase() } }).then(domain => callback(null, Boolean(domain))).catch(callback);
+    } catch { callback(null, false); }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Session', 'Idempotency-Key']
 }));
+app.use('/api/webhooks/kushki', kushkiWebhookRouter(prisma));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -52,10 +70,11 @@ const transporter = nodemailer.createTransport({
 // HELPERS
 // ====================================================================
 
-/** Calcula el costo en USD para un lead basado en el presupuesto estimado */
-function calculateLeadCostUSD(estimatedBudget: number): number {
-  const raw = estimatedBudget * LEAD_FEE_RATE;
-  return Math.max(raw, LEAD_MIN_COST_USD);
+async function tenantForHost(hostname: string): Promise<string | null> {
+  const normalized = hostname.toLowerCase();
+  if (normalized === 'localhost' || normalized === '127.0.0.1') return 'artocamello';
+  const domain = await prisma.tenantDomain.findUnique({ where: { hostname: normalized } });
+  return domain?.tenantId || null;
 }
 
 // ====================================================================
@@ -65,7 +84,13 @@ function calculateLeadCostUSD(estimatedBudget: number): number {
 // 1. Registro
 app.post('/api/auth/register', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, fullName, role, phone } = req.body;
+    const { email, password, fullName, phone } = req.body || {};
+    if (typeof email !== 'string' || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || typeof password !== 'string' || password.length < 8 || password.length > 128 || typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.length > 100 || (phone !== undefined && (typeof phone !== 'string' || phone.length > 30))) { res.status(400).json({ error: 'Datos de registro inválidos' }); return; }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['register-ip', tenantId, ip], 20, 3600000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos de registro' }); return; }
     const finalRole = 'guest'; // Siempre forzar guest al inicio
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -88,13 +113,15 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
           phone,
           emailVerified: false,
           verificationToken,
+          tenantId,
         },
       });
 
       return newUser;
     });
 
-    const verificationLink = `${APP_BASE_URL}/verify?token=${verificationToken}`;
+    const verificationLink = `${await publicBaseUrl(prisma, tenantId, req.hostname)}/verify?token=${verificationToken}`;
+    const safeName = fullName.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
     try {
       await transporter.sendMail({
         from: `"ArtoCamello Cuentas" <${process.env.SMTP_USER}>`,
@@ -103,7 +130,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
             <h1 style="color: #FFCA0C; font-size: 24px;">¡Bienvenido a ArtoCamello!</h1>
-            <p>Hola <b>${fullName}</b>,</p>
+            <p>Hola <b>${safeName}</b>,</p>
             <p>Gracias por unirte. Para acceder a tu panel, verifica que este es tu correo.</p>
             <div style="text-align: center; margin: 30px 0;">
               <a href="${verificationLink}" style="background-color: #101828; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
@@ -133,12 +160,22 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
 // 2. Login
 app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
-
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || typeof password !== 'string' || email.length > 320 || password.length > 1024) { res.status(400).json({ error: 'Credenciales inválidas' }); return; }
+    const loginTenantId = await tenantForHost(req.hostname);
+    if (!loginTenantId) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const ipLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['login-ip', loginTenantId, ip], 80, 15 * 60000);
+    const accountLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['login-account-ip', loginTenantId, ip, email.trim().toLowerCase()], 8, 15 * 60000);
+    if (!ipLimit.allowed || !accountLimit.allowed) { res.setHeader('Retry-After', String(Math.max(ipLimit.retryAfterSeconds, accountLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiados intentos. Espera antes de volver a iniciar sesión' }); return; }
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    if (!user || !user.active) {
       res.status(401).json({ error: 'Credenciales inválidas' });
       return;
+    }
+    if (user.tenantId !== loginTenantId) {
+      const membership = await prisma.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: loginTenantId, userId: user.id } } });
+      if (!membership || !['active','invited'].includes(membership.status)) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
     }
 
     if (!user.emailVerified) {
@@ -152,9 +189,11 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const { password: _, ...userWithoutPassword } = user;
+    await clearAuthAttempt(prisma, JWT_SECRET, ['login-account-ip', loginTenantId, ip, email.trim().toLowerCase()]);
+
+    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = user;
     const token = jwt.sign(
-      { userId: user.id, role: user.role, email: user.email },
+      { userId: user.id, role: user.role, email: user.email, sessionVersion: user.sessionVersion },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -169,13 +208,19 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
 // 3. Login y Registro vía Google
 app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { credential, role } = req.body;
+    const { credential } = req.body || {};
+    if (typeof credential !== 'string' || !credential || credential.length > 8192) { res.status(400).json({ error: 'Credencial de Google inválida' }); return; }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['google-ip', tenantId, ip], 60, 15 * 60000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos. Espera antes de volver a iniciar sesión' }); return; }
 
     let payload: any;
     if (credential.startsWith('ya29.')) {
       // Es un Access Token (proviene de un botón personalizado con useGoogleLogin)
       try {
-        const userInfoRes = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${credential}`);
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: `Bearer ${credential}` } });
         if (!userInfoRes.ok) {
           throw new Error('No se pudo obtener información del usuario desde Google');
         }
@@ -208,6 +253,7 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
       res.status(401).json({ error: 'Token de Google sin email ligado.' });
       return;
     }
+    if (!payload.email_verified) { res.status(403).json({ error: 'Correo de Google no verificado' }); return; }
 
     const { email, name, picture } = payload;
 
@@ -225,6 +271,7 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
             avatarUrl: picture,
             emailVerified: true,
             role: defaultRole,
+            tenantId,
           },
         });
 
@@ -232,10 +279,15 @@ app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> 
       });
     }
 
-    const { password: _, ...userWithoutPassword } = user;
+    if (!user.active) { res.status(403).json({ error: 'Tenant o cuenta no disponible' }); return; }
+    if (user.tenantId !== tenantId) {
+      const membership = await prisma.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } } });
+      if (!membership || !['active', 'invited'].includes(membership.status)) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
+    }
+    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = user;
 
     const jwtToken = jwt.sign(
-      { userId: user.id, role: user.role, email: user.email },
+      { userId: user.id, role: user.role, email: user.email, sessionVersion: user.sessionVersion },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -267,10 +319,10 @@ app.get('/api/auth/verify', async (req: Request, res: Response): Promise<void> =
       data: { emailVerified: true, verificationToken: null },
     });
 
-    const { password: _, ...userWithoutPassword } = verifiedUser;
+    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = verifiedUser;
 
     const jwtToken = jwt.sign(
-      { userId: verifiedUser.id, role: verifiedUser.role, email: verifiedUser.email },
+      { userId: verifiedUser.id, role: verifiedUser.role, email: verifiedUser.email, sessionVersion: verifiedUser.sessionVersion },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -287,7 +339,7 @@ app.get('/api/auth/verify', async (req: Request, res: Response): Promise<void> =
 // ====================================================================
 
 export interface AuthRequest extends Request {
-  user?: { userId: string; role: string; email: string };
+  user?: { userId: string; role: string; email: string; tenantId: string };
 }
 
 const authenticateToken = (req: AuthRequest, res: Response, next: express.NextFunction): void => {
@@ -303,8 +355,16 @@ const authenticateToken = (req: AuthRequest, res: Response, next: express.NextFu
       res.status(403).json({ error: 'Denegado: Token inválido o expirado' });
       return;
     }
-    req.user = decoded as any;
-    next();
+    const claims = decoded as { userId?: string; sessionVersion?: number };
+    if (!claims.userId) { res.status(403).json({ error: 'Token invalido' }); return; }
+    prisma.user.findUnique({ where: { id: claims.userId } }).then(user => {
+      if (!user?.active || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión no disponible' }); return; }
+      tenantForHost(req.hostname).then(tenantId => {
+        if (!tenantId || tenantId !== user.tenantId) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
+        req.user = { userId: user.id, role: user.role, email: user.email, tenantId };
+        next();
+      }).catch(next);
+    }).catch(next);
   });
 };
 
@@ -331,31 +391,32 @@ app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Resp
       res.status(404).json({ error: 'Usuario no encontrado' });
       return;
     }
+    if (user.role !== 'guest' || user.clientProfile || user.professionalProfile) {
+      res.status(409).json({ error: 'El rol ya fue definido' });
+      return;
+    }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
-      // Limpiar perfiles anteriores para evitar conflictos si el usuario cambió de opinión en el onboarding
+      const claimed = await tx.user.updateMany({ where: { id: userId, role: 'guest' }, data: { role } });
+      if (!claimed.count) return null;
       if (role === 'client') {
-        await tx.professionalProfile.deleteMany({ where: { userId } });
-        if (!user.clientProfile) {
-          await tx.clientProfile.create({ data: { userId } });
-        }
-      } else if (role === 'pro') {
-        await tx.clientProfile.deleteMany({ where: { userId } });
-        if (!user.professionalProfile) {
-          await tx.professionalProfile.create({
-            data: { userId, bio: '', categories: [], serviceZones: [] },
-          });
-        }
+        await tx.clientProfile.create({ data: { userId, tenantId: req.user!.tenantId } });
+      } else {
+        await tx.professionalProfile.create({
+          data: { userId, tenantId: req.user!.tenantId, bio: '', categories: [], serviceZones: [] },
+        });
       }
-
-      const updated = await tx.user.update({ where: { id: userId }, data: { role } });
-      return updated;
+      return tx.user.findUniqueOrThrow({ where: { id: userId } });
     });
+    if (!updatedUser) {
+      res.status(409).json({ error: 'El rol ya fue definido' });
+      return;
+    }
 
-    const { password: _, ...userWithoutPassword } = updatedUser;
+    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = updatedUser;
 
     const newToken = jwt.sign(
-      { userId: updatedUser.id, role: updatedUser.role, email: updatedUser.email },
+      { userId: updatedUser.id, role: updatedUser.role, email: updatedUser.email, sessionVersion: updatedUser.sessionVersion },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -374,6 +435,7 @@ app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Resp
 // 6. Crear una nueva petición (Cliente)
 app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (req.user!.role !== 'client') { res.status(403).json({ error: 'Solo los clientes pueden crear solicitudes.' }); return; }
     const {
       categorySlug, title, description, location,
       urgency, preferredDate, contactPhone, contactEmail, estimatedBudget,
@@ -386,6 +448,7 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
 
     const newRequest = await prisma.serviceRequest.create({
       data: {
+        tenantId: req.user!.tenantId,
         clientId: req.user!.userId,
         categorySlug,
         title,
@@ -411,10 +474,12 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
 app.get('/api/requests/client', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const requests = await prisma.serviceRequest.findMany({
-      where: { clientId: req.user!.userId },
+      where: { clientId: req.user!.userId, tenantId: req.user!.tenantId },
       orderBy: { createdAt: 'desc' },
     });
-    res.status(200).json(requests);
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
+    const maxProfessionalsPerLead = settingsOf(tenant.settings).maxProfessionalsPerLead;
+    res.status(200).json(requests.map(request => ({ ...request, maxProfessionalsPerLead })));
   } catch (error) {
     console.error('Error getting client requests:', error);
     res.status(500).json({ error: 'Error al obtener peticiones' });
@@ -434,12 +499,15 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
     }
     const realProfId = requestingUser.professionalProfile.id;
 
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
+    const maxProfessionals = settingsOf(tenant.settings).maxProfessionalsPerLead;
     const requests = await prisma.serviceRequest.findMany({
       where: {
+        tenantId: req.user!.tenantId,
         status: { in: ['contact_limit_open', 'matching'] },
-        purchaseCount: { lt: 6 },
+        purchaseCount: { lt: maxProfessionals },
         leadPurchases: {
-          none: { professionalId: realProfId },
+          none: { professionalId: realProfId, status: 'paid' },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -451,9 +519,10 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
       : requests;
 
     // Añadir costUSD calculado para que el frontend lo muestre sin lógica de negocio
-    const enriched = filtered.map((r) => ({
+    const enriched = filtered.map(({ contactPhone: _phone, contactEmail: _email, ...r }) => ({
       ...r,
-      costUSD: parseFloat(calculateLeadCostUSD(r.estimatedBudget).toFixed(2)),
+      maxProfessionalsPerLead: maxProfessionals,
+      costUSD: leadAmount(r.estimatedBudget, settingsOf(tenant.settings)).toNumber(),
     }));
 
     res.status(200).json(enriched);
@@ -488,106 +557,75 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
 
     const realProfId = requestingUser.professionalProfile.id;
 
-    const request = await prisma.serviceRequest.findUnique({ where: { id: requestId } });
+    const request = await prisma.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
     if (!request) {
       res.status(404).json({ error: 'Solicitud no encontrada.' });
       return;
     }
-    if (request.status === 'cancelled') {
-      res.status(400).json({ error: 'Esta solicitud fue cancelada.' });
+    if (!['matching', 'contact_limit_open'].includes(request.status)) {
+      res.status(409).json({ error: 'Esta solicitud ya no está disponible para comprar contactos.' });
       return;
     }
-    if (request.purchaseCount >= 6) {
-      res.status(400).json({ error: 'Límite de 6 profesionales alcanzado para esta solicitud.' });
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
+    const tenantSettings = settingsOf(tenant.settings);
+    if (request.purchaseCount >= tenantSettings.maxProfessionalsPerLead) {
+      res.status(400).json({ error: `Límite de ${tenantSettings.maxProfessionalsPerLead} profesionales alcanzado.` });
       return;
     }
 
-    // Verificar que no haya comprado ya este lead (incluyendo estado pending, para no crear duplicados)
-    const existingPurchase = await prisma.leadPurchase.findUnique({
-      where: { requestId_professionalId: { requestId, professionalId: realProfId } },
+    const initiated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${requestId}:${req.user!.userId}`}))`;
+      const currentRequest = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
+      if (!currentRequest || !['matching', 'contact_limit_open'].includes(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 409 };
+      if (currentRequest.purchaseCount >= tenantSettings.maxProfessionalsPerLead) return { error: 'Cupo de profesionales agotado', statusCode: 409 };
+      const existing = await tx.leadPurchase.findUnique({ where: { requestId_professionalId: { requestId, professionalId: realProfId } } });
+      if (existing?.status === 'paid') return { error: 'Ya has comprado este contacto', statusCode: 409 };
+      if (existing) {
+        const active = await tx.payment.findFirst({ where: { tenantId: req.user!.tenantId, metadata: { path: ['leadPurchaseId'], equals: existing.id }, OR: [{ status: { in: ['under_review', 'approved'] } }, { status: { in: ['created', 'awaiting_transfer', 'pending_provider'] }, expiresAt: { gt: new Date() } }] } });
+        if (active) return { error: 'Ya hay un pago en proceso para este contacto', statusCode: 409 };
+      }
+      const amount = leadAmount(currentRequest.estimatedBudget, tenantSettings);
+      const clientTxId = `A${crypto.randomBytes(7).toString('hex')}`;
+      const purchase = existing
+        ? await tx.leadPurchase.update({ where: { id: existing.id }, data: { costUSD: amount.toNumber(), payphoneClientTxId: clientTxId, status: 'pending' } })
+        : await tx.leadPurchase.create({ data: { requestId, tenantId: req.user!.tenantId, professionalId: realProfId, costUSD: amount.toNumber(), status: 'pending', payphoneClientTxId: clientTxId } });
+      const payment = await tx.payment.create({ data: {
+        tenantId: req.user!.tenantId, payerUserId: req.user!.userId, amount,
+        currency: 'USD', method: 'payphone', status: 'created', reference: clientTxId,
+        provider: 'payphone', metadata: { leadPurchaseId: purchase.id, requestId },
+        expiresAt: new Date(Date.now() + 72 * 3600000),
+      } });
+      return { payment, clientTxId };
     });
-    if (existingPurchase && existingPurchase.status === 'paid') {
-      res.status(400).json({ error: 'Ya has comprado este contacto.' });
-      return;
-    }
-
-    const costUSD = parseFloat(calculateLeadCostUSD(request.estimatedBudget).toFixed(2));
-
-    // ID único de nuestra transacción para identificar el callback de PayPhone
-    const clientTxId = crypto.randomUUID();
-
-    // Crear o actualizar LeadPurchase en estado pending
-    if (existingPurchase) {
-      // Si existía un pending fallido, lo actualizamos
-      await prisma.leadPurchase.update({
-        where: { id: existingPurchase.id },
-        data: { costUSD, payphoneClientTxId: clientTxId, status: 'pending' },
-      });
-    } else {
-      await prisma.leadPurchase.create({
-        data: {
-          requestId,
-          professionalId: realProfId,
-          costUSD,
-          status: 'pending',
-          payphoneClientTxId: clientTxId,
-        },
-      });
-    }
+    if ('error' in initiated) { res.status(initiated.statusCode!).json({ error: initiated.error }); return; }
+    const { payment, clientTxId } = initiated;
+    const costUSD = payment.amount.toNumber();
 
     // ------------------------------------------------------------------
     // Llamada a la API de PayPhone para crear el link de pago
     // Documentación oficial PayPhone Button 2.0:
-    //   POST https://pay.payfphone.com/v2/link
+    //   POST https://pay.payphonetodoesposible.com/api/button/Prepare
     // ------------------------------------------------------------------
-    const amountInCents = Math.round(costUSD * 100); // PayPhone trabaja en centavos
-
-    const payphonePayload = {
-      amount: amountInCents,
-      amountWithoutTax: amountInCents,
-      amountWithTax: 0,
-      tax: 0,
-      service: 0,
-      tip: 0,
-      currency: 'USD',
-      storeId: PAYPHONE_STORE_ID,
-      reference: `lead-${requestId.substring(0, 8)}`,
-      clientTransactionId: clientTxId,
-      responseUrl: `${APP_BASE_URL}/dashboard/payment-success`,
-      cancellationUrl: `${APP_BASE_URL}/dashboard/payment-failed`,
-      lang: 'es',
-    };
-
-    // Si no hay token de PayPhone configurado, usamos un mock para desarrollo
-    if (!PAYPHONE_TOKEN || PAYPHONE_TOKEN === 'TU_PAYPHONE_TOKEN_AQUI') {
-      console.warn('[PAYPHONE MOCK] Credenciales no configuradas. Devolviendo URL de simulación.');
-      const mockRedirectUrl = `${APP_BASE_URL}/dashboard/payment-success?clientTxId=${clientTxId}&id=MOCK_TX_ID&transactionStatus=Approved`;
-      res.status(200).json({ redirectUrl: mockRedirectUrl, costUSD, clientTxId });
-      return;
+    const returnBase = await publicBaseUrl(prisma, req.user!.tenantId, req.hostname);
+    const provider = new PayPhoneProvider(PAYPHONE_TOKEN, PAYPHONE_STORE_ID, PAYPHONE_BASE_URL, returnBase);
+    try {
+      const intent = await provider.createIntent({
+        reference: clientTxId, amount: payment.amount.toFixed(2), currency: 'USD', requestId,
+        responseUrl: `${returnBase}/dashboard/payment-success`,
+        cancellationUrl: `${returnBase}/dashboard/payment-failed`,
+      });
+      await prisma.$transaction(async tx => {
+        await tx.payment.update({ where: { id: payment.id }, data: { status: 'pending_provider' } });
+        await tx.paymentEvent.create({ data: { tenantId: req.user!.tenantId, paymentId: payment.id, type: 'created', source: 'payphone', idempotencyKey: `created:${payment.id}`, payload: {} } });
+      });
+      res.status(200).json({ redirectUrl: intent.checkoutUrl, costUSD, clientTxId });
+    } catch (error) {
+      await prisma.$transaction(async tx => {
+        const changed = await tx.payment.updateMany({ where: { id: payment.id, status: 'created' }, data: { status: 'failed' } });
+        if (changed.count) await tx.paymentEvent.create({ data: { tenantId: req.user!.tenantId, paymentId: payment.id, type: 'failed', source: 'payphone', idempotencyKey: `intent-failed:${payment.id}`, payload: {} } });
+      });
+      throw error;
     }
-
-    const payphoneRes = await fetch(`${PAYPHONE_BASE_URL}/v2/link`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${PAYPHONE_TOKEN}`,
-      },
-      body: JSON.stringify(payphonePayload),
-    });
-
-    if (!payphoneRes.ok) {
-      const errorBody = await payphoneRes.text();
-      console.error('PayPhone API error:', errorBody);
-      res.status(502).json({ error: 'Error al crear el enlace de pago con PayPhone.' });
-      return;
-    }
-
-    const payphoneData = (await payphoneRes.json()) as { payWithPayPhone: string };
-    res.status(200).json({
-      redirectUrl: payphoneData.payWithPayPhone,
-      costUSD,
-      clientTxId,
-    });
   } catch (error) {
     console.error('Error in /api/leads/pay:', error);
     res.status(500).json({ error: 'Error del servidor al iniciar el pago.' });
@@ -608,17 +646,16 @@ app.post('/api/leads/pay/confirm', authenticateToken, async (req: AuthRequest, r
       return;
     }
 
-    const purchase = await prisma.leadPurchase.findUnique({
-      where: { payphoneClientTxId: clientTxId },
+    const payment = await prisma.payment.findFirst({ where: { tenantId: req.user!.tenantId, payerUserId: req.user!.userId, reference: clientTxId, method: 'payphone' } });
+    if (!payment) { res.status(404).json({ error: 'Pago no encontrado' }); return; }
+    const purchaseId = (payment.metadata as { leadPurchaseId?: string }).leadPurchaseId;
+    const purchase = await prisma.leadPurchase.findFirst({
+      where: { tenantId: req.user!.tenantId, professional: { userId: req.user!.userId }, ...(purchaseId ? { id: purchaseId } : { payphoneClientTxId: clientTxId }) },
       include: { request: true },
     });
+    if (!purchase) { res.status(404).json({ error: 'Intención de pago no encontrada.' }); return; }
 
-    if (!purchase) {
-      res.status(404).json({ error: 'Intención de pago no encontrada.' });
-      return;
-    }
-
-    if (purchase.status === 'paid') {
+    if (payment.status === 'allocated' && purchase.status === 'paid') {
       // Ya confirmado anteriormente — devolver los datos del contacto directamente
       const request = purchase.request;
       res.status(200).json({
@@ -632,74 +669,60 @@ app.post('/api/leads/pay/confirm', authenticateToken, async (req: AuthRequest, r
 
     // ------------------------------------------------------------------
     // Verificar el pago con PayPhone
-    // GET https://pay.payfphone.com/v2/link?clientTransactionId=<id>
+    // POST https://pay.payphonetodoesposible.com/api/button/V2/Confirm
     // ------------------------------------------------------------------
-    let payphoneVerified = false;
-    let realTxId = payphoneTransactionId || '';
-
-    if (!PAYPHONE_TOKEN || PAYPHONE_TOKEN === 'TU_PAYPHONE_TOKEN_AQUI') {
-      // MOCK: en desarrollo, si el payphoneTransactionId es 'MOCK_TX_ID', aprobamos
-      console.warn('[PAYPHONE MOCK] Aprobando transacción en modo desarrollo.');
-      payphoneVerified = true;
+    let paymentStatus: 'approved' | 'failed' | 'pending' = 'pending';
+    let realTxId = '';
+    let verifiedAmountCents: number | undefined;
+    let verifiedCurrency: string | undefined;
+    if (process.env.NODE_ENV !== 'production' && process.env.PAYPHONE_MOCK === 'true' && (!PAYPHONE_TOKEN || PAYPHONE_TOKEN === 'TU_PAYPHONE_TOKEN_AQUI' || !PAYPHONE_STORE_ID) && payphoneTransactionId === 'MOCK_TX_ID') {
+      paymentStatus = 'approved';
       realTxId = 'MOCK_TX_ID';
+      verifiedAmountCents = payment.amount.mul(100).toNumber();
+      verifiedCurrency = 'USD';
     } else {
-      const verifyRes = await fetch(
-        `${PAYPHONE_BASE_URL}/v2/link?clientTransactionId=${clientTxId}`,
-        {
-          headers: { Authorization: `Bearer ${PAYPHONE_TOKEN}` },
-        }
-      );
-
-      if (verifyRes.ok) {
-        const verifyData = (await verifyRes.json()) as {
-          transactionStatus: string;
-          transactionId?: number;
-        };
-        payphoneVerified = verifyData.transactionStatus === 'Approved';
-        realTxId = verifyData.transactionId?.toString() || '';
-      }
+      if (clientTxId.length <= 16 && !/^[1-9]\d{0,15}$/.test(String(payphoneTransactionId || ''))) { res.status(400).json({ error: 'ID de transacción PayPhone inválido' }); return; }
+      const provider = new PayPhoneProvider(PAYPHONE_TOKEN, PAYPHONE_STORE_ID, PAYPHONE_BASE_URL, APP_BASE_URL);
+      const verified = await provider.getPayment(clientTxId, payphoneTransactionId);
+      paymentStatus = verified.status;
+      realTxId = verified.providerPaymentId || '';
+      verifiedAmountCents = verified.amountCents;
+      verifiedCurrency = verified.currency;
     }
-
-    if (!payphoneVerified) {
-      // Marcar como fallido
-      await prisma.leadPurchase.update({
-        where: { id: purchase.id },
-        data: { status: 'failed' },
+    if (paymentStatus === 'pending') { res.status(202).json({ error: 'Pago pendiente de confirmación del proveedor' }); return; }
+    if (paymentStatus !== 'approved') {
+      await prisma.$transaction(async tx => {
+        const changed = await tx.payment.updateMany({ where: { id: payment.id, status: 'pending_provider' }, data: { status: 'failed' } });
+        if (changed.count) await tx.paymentEvent.create({ data: { tenantId: req.user!.tenantId, paymentId: payment.id, type: 'failed', source: 'payphone', idempotencyKey: `failed:${payment.id}`, payload: {} } });
       });
       res.status(402).json({ error: 'El pago no fue aprobado por PayPhone.' });
       return;
     }
-
-    // Confirmar el pago en base de datos (transacción atómica)
-    const result = await prisma.$transaction(async (tx) => {
-      const updated = await tx.leadPurchase.update({
-        where: { id: purchase.id },
-        data: {
-          status: 'paid',
-          payphoneTransactionId: realTxId,
-          paidAt: new Date(),
-        },
-        include: { request: true },
-      });
-
-      // Incrementar contador de compras en la solicitud
-      const newCount = purchase.request.purchaseCount + 1;
-      let newStatus = purchase.request.status;
-      if (newCount >= 6) newStatus = 'contact_limit_reached';
-
-      await tx.serviceRequest.update({
-        where: { id: purchase.requestId },
-        data: { purchaseCount: newCount, status: newStatus },
-      });
-
-      return updated;
+    if (!realTxId || verifiedAmountCents !== payment.amount.mul(100).toNumber() || verifiedCurrency !== payment.currency) {
+      res.status(409).json({ error: 'Monto, moneda o identificador PayPhone no coinciden' });
+      return;
+    }
+    await prisma.$transaction(async tx => {
+      const changed = await tx.payment.updateMany({ where: { id: payment.id, status: { in: ['created', 'pending_provider', 'expired', 'failed'] } }, data: { status: 'approved', providerPaymentId: realTxId } });
+      if (changed.count) await tx.paymentEvent.create({ data: { tenantId: req.user!.tenantId, paymentId: payment.id, type: 'provider_approved', source: 'payphone', idempotencyKey: `payphone-approved:${payment.id}`, payload: { amountCents: verifiedAmountCents, currency: verifiedCurrency, providerPaymentId: realTxId } } });
     });
-
+    try {
+      await allocateLead(prisma, payment.id, req.user!.tenantId, 'payphone');
+    } catch (error) {
+      if (error instanceof PaymentConflict || (error as { code?: string }).code === 'P2034') {
+        const latest = await prisma.payment.findUnique({ where: { id: payment.id } });
+        if (latest?.status === 'allocated') { res.status(200).json({ success: true, alreadyPaid: true, contactPhone: purchase.request.contactPhone, contactEmail: purchase.request.contactEmail, costUSD: purchase.costUSD }); return; }
+        if (latest?.status === 'approved') await prisma.paymentEvent.create({ data: { tenantId: req.user!.tenantId, paymentId: payment.id, type: 'manual_resolution_required', source: 'payphone', idempotencyKey: `manual:${payment.id}`, payload: { reason: error instanceof Error ? error.message : 'Conflicto de asignación' } } }).catch(dbError => { if ((dbError as { code?: string }).code !== 'P2002') throw dbError; });
+        res.status(409).json({ error: error instanceof Error ? error.message : 'Conflicto de cupo' });
+        return;
+      }
+      throw error;
+    }
     res.status(200).json({
       success: true,
-      contactPhone: result.request.contactPhone,
-      contactEmail: result.request.contactEmail,
-      costUSD: result.costUSD,
+      contactPhone: purchase.request.contactPhone,
+      contactEmail: purchase.request.contactEmail,
+      costUSD: purchase.costUSD,
     });
   } catch (error) {
     console.error('Error in /api/leads/pay/confirm:', error);
@@ -725,7 +748,7 @@ app.get('/api/leads/unlocked', authenticateToken, async (req: AuthRequest, res: 
     const realProfId = requestingUser.professionalProfile.id;
 
     const purchases = await prisma.leadPurchase.findMany({
-      where: { professionalId: realProfId, status: 'paid' },
+      where: { professionalId: realProfId, tenantId: req.user!.tenantId, status: 'paid' },
       orderBy: { paidAt: 'desc' },
       include: {
         request: { include: { client: true } },
@@ -771,23 +794,21 @@ app.get('/api/payments/history', authenticateToken, async (req: AuthRequest, res
       return;
     }
 
-    const realProfId = requestingUser.professionalProfile.id;
-
-    const payments = await prisma.leadPurchase.findMany({
-      where: { professionalId: realProfId, status: 'paid' },
-      orderBy: { paidAt: 'desc' },
-      include: { request: true },
+    const payments = await prisma.payment.findMany({
+      where: { payerUserId: req.user!.userId, tenantId: req.user!.tenantId, status: 'allocated' },
+      orderBy: { confirmedAt: 'desc' },
+      include: { allocations: { include: { leadPurchase: { include: { request: true } } } } },
     });
 
-    const history = payments.map((p) => ({
+    const history = payments.flatMap((p) => p.allocations.map(a => ({
       id: p.id,
-      date: p.paidAt || p.purchasedAt,
-      description: `Contacto: ${p.request.title}`,
-      location: p.request.location,
-      costUSD: p.costUSD,
-      payphoneTransactionId: p.payphoneTransactionId,
-      requestId: p.requestId,
-    }));
+      date: p.confirmedAt || p.createdAt,
+      description: `Contacto: ${a.leadPurchase.request.title}`,
+      location: a.leadPurchase.request.location,
+      costUSD: p.amount.toNumber(),
+      payphoneTransactionId: p.providerPaymentId || undefined,
+      requestId: a.leadPurchase.requestId,
+    })));
 
     res.status(200).json(history);
   } catch (error) {
@@ -822,7 +843,7 @@ app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Respons
     const purchase = await prisma.leadPurchase.findUnique({
       where: { requestId_professionalId: { requestId, professionalId: realProfId } },
     });
-    if (!purchase || purchase.status !== 'paid') {
+    if (!purchase || purchase.status !== 'paid' || purchase.tenantId !== req.user!.tenantId) {
       res.status(403).json({ error: 'Debes desbloquear el contacto primero.' });
       return;
     }
@@ -838,6 +859,7 @@ app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Respons
         estimatedDays: estimatedDays ? parseInt(estimatedDays) : null,
       },
       create: {
+        tenantId: req.user!.tenantId,
         requestId,
         professionalId: realProfId,
         message,
@@ -863,13 +885,13 @@ app.get('/api/quotes/request/:id', authenticateToken, async (req: AuthRequest, r
     
     // Verificar que la solicitud pertenezca al cliente actual
     const request = await prisma.serviceRequest.findUnique({ where: { id } });
-    if (!request || request.clientId !== req.user!.userId) {
+    if (!request || request.clientId !== req.user!.userId || request.tenantId !== req.user!.tenantId) {
       res.status(403).json({ error: 'No tienes acceso a esta solicitud.' });
       return;
     }
 
     const quotes = await prisma.quote.findMany({
-      where: { requestId: id },
+      where: { requestId: id, tenantId: req.user!.tenantId },
       include: {
         professional: {
           include: { user: true }
@@ -918,7 +940,7 @@ app.get('/api/quotes/me', authenticateToken, async (req: AuthRequest, res: Respo
     }
 
     const quotes = await prisma.quote.findMany({
-      where: { professionalId: user.professionalProfile.id },
+      where: { professionalId: user.professionalProfile.id, tenantId: req.user!.tenantId },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -942,7 +964,7 @@ app.post('/api/quotes/:id/accept', authenticateToken, async (req: AuthRequest, r
       include: { request: true }
     });
 
-    if (!quote || quote.request.clientId !== req.user!.userId) {
+    if (!quote || quote.request.clientId !== req.user!.userId || quote.tenantId !== req.user!.tenantId) {
       res.status(403).json({ error: 'No tienes permisos.' });
       return;
     }
@@ -983,7 +1005,7 @@ app.post('/api/requests/:id/cancel', authenticateToken, async (req: AuthRequest,
     const { id } = req.params;
     const request = await prisma.serviceRequest.findUnique({ where: { id } });
     
-    if (!request || request.clientId !== req.user!.userId) {
+    if (!request || request.clientId !== req.user!.userId || request.tenantId !== req.user!.tenantId) {
       res.status(403).json({ error: 'No autorizado' });
       return;
     }
@@ -1005,7 +1027,7 @@ app.post('/api/requests/:id/complete', authenticateToken, async (req: AuthReques
     const { id } = req.params;
     const request = await prisma.serviceRequest.findUnique({ where: { id } });
     
-    if (!request || request.clientId !== req.user!.userId) {
+    if (!request || request.clientId !== req.user!.userId || request.tenantId !== req.user!.tenantId) {
       res.status(403).json({ error: 'No autorizado' });
       return;
     }
@@ -1043,7 +1065,7 @@ app.get('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
       return;
     }
 
-    const { password: _, verificationToken: __, ...safeUser } = user;
+    const { password: _, verificationToken: __, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, ...safeUser } = user;
 
     res.status(200).json({
       user: safeUser,
@@ -1125,7 +1147,7 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
       });
     }
 
-    const { password: _, verificationToken: __, ...safeUser } = updatedUser;
+    const { password: _, verificationToken: __, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, ...safeUser } = updatedUser;
 
     res.status(200).json({
       success: true,
@@ -1158,7 +1180,7 @@ app.get('/api/client/profile', authenticateToken, async (req: AuthRequest, res: 
       return;
     }
 
-    const { password: _, verificationToken: __, ...safeUser } = user;
+    const { password: _, verificationToken: __, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, ...safeUser } = user;
 
     res.status(200).json({
       user: safeUser,
@@ -1216,7 +1238,7 @@ app.put('/api/client/profile', authenticateToken, async (req: AuthRequest, res: 
       });
     }
 
-    const { password: _, verificationToken: __, ...safeUser } = updatedUser;
+    const { password: _, verificationToken: __, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, ...safeUser } = updatedUser;
 
     res.status(200).json({
       success: true,
@@ -1258,7 +1280,7 @@ app.post('/api/profile/change-password', authenticateToken, async (req: AuthRequ
     }
 
     const hashed = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
+    await prisma.user.update({ where: { id: user.id }, data: { password: hashed, sessionVersion: { increment: 1 } } });
 
     res.status(200).json({ success: true, message: 'Contraseña actualizada correctamente.' });
   } catch (error) {
@@ -1277,19 +1299,17 @@ app.post('/api/profile/change-password', authenticateToken, async (req: AuthRequ
  */
 app.get('/api/professionals', async (req: Request, res: Response): Promise<void> => {
   try {
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).end(); return; }
     const pros = await prisma.user.findMany({
-      where: { role: 'pro' },
-      include: { professionalProfile: true },
+      where: { role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true } },
+      select: { id: true, fullName: true, avatarUrl: true, createdAt: true, professionalProfile: { select: {
+        id: true, businessName: true, bio: true, categories: true, serviceZones: true,
+        experienceYears: true, portfolioImages: true, skills: true, city: true,
+        rating: true, reviewCount: true, verified: true, completedJobs: true,
+      } } },
     });
-
-    // Mapeamos para enviar solo los datos seguros/públicos
-    const mappedPros = pros.map(user => {
-      const { password, verificationToken, email, phone, ...publicUser } = user;
-      return {
-        ...publicUser,
-        profile: user.professionalProfile
-      };
-    });
+    const mappedPros = pros.map(({ professionalProfile, ...user }) => ({ ...user, profile: professionalProfile }));
 
     res.status(200).json(mappedPros);
   } catch (error) {
@@ -1305,12 +1325,20 @@ app.get('/api/professionals', async (req: Request, res: Response): Promise<void>
 app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).end(); return; }
     const user = await prisma.user.findFirst({
-      where: { id: id, role: 'pro' },
-      include: { 
-        professionalProfile: true,
+      where: { id: id, role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true } },
+      select: {
+        id: true, fullName: true, avatarUrl: true, createdAt: true,
+        professionalProfile: { select: {
+          id: true, businessName: true, bio: true, categories: true, serviceZones: true,
+          experienceYears: true, portfolioImages: true, skills: true, city: true,
+          rating: true, reviewCount: true, verified: true, completedJobs: true,
+        } },
         reviewsReceived: {
-          include: {
+          where: { tenantId },
+          select: { id: true, rating: true, comment: true, createdAt: true,
             client: {
               select: {
                 id: true,
@@ -1332,13 +1360,8 @@ app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const { password, verificationToken, email, phone, ...publicUser } = user;
-    
-    res.status(200).json({
-      ...publicUser,
-      profile: user.professionalProfile,
-      reviews: user.reviewsReceived
-    });
+    const { professionalProfile, reviewsReceived, ...publicUser } = user;
+    res.status(200).json({ ...publicUser, profile: professionalProfile, reviews: reviewsReceived });
   } catch (error) {
     console.error('Error in GET /api/professionals/:id:', error);
     res.status(500).json({ error: 'Error al cargar profesional' });
@@ -1355,25 +1378,25 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
     const { rating, comment } = req.body;
     const clientId = req.user!.userId;
 
-    if (!rating || !comment) {
-      res.status(400).json({ error: 'Calificación y comentario son obligatorios.' });
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || typeof comment !== 'string' || !comment.trim() || comment.length > 2000) {
+      res.status(400).json({ error: 'Calificación o comentario inválidos.' });
       return;
     }
 
     // 1. Verificar que el cliente esté verificado
     const client = await prisma.user.findUnique({ where: { id: clientId } });
-    if (!client || !client.emailVerified) {
-      res.status(403).json({ error: 'Tu cuenta debe estar verificada por correo para dejar reseñas.' });
+    if (!client || client.role !== 'client' || client.tenantId !== req.user!.tenantId || !client.emailVerified) {
+      res.status(403).json({ error: 'Solo un cliente verificado puede dejar reseñas.' });
       return;
     }
 
     // 2. Verificar que el profesional existe
     const pro = await prisma.user.findFirst({
-      where: { id: professionalId, role: 'pro' },
+      where: { id: professionalId, role: 'pro', tenantId: req.user!.tenantId, active: true },
       include: { professionalProfile: true }
     });
 
-    if (!pro || !pro.professionalProfile) {
+    if (!pro || !pro.professionalProfile?.verified || pro.professionalProfile.tenantId !== req.user!.tenantId) {
       res.status(404).json({ error: 'Profesional no encontrado.' });
       return;
     }
@@ -1382,10 +1405,11 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
     const newReview = await prisma.$transaction(async (tx) => {
       const review = await tx.review.create({
         data: {
-          rating: Number(rating),
-          comment,
+          rating,
+          comment: comment.trim(),
           clientId,
-          professionalId
+          professionalId,
+          tenantId: req.user!.tenantId
         },
         include: {
           client: {
@@ -1399,7 +1423,7 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
 
       // 4. Actualizar agregados en el perfil del profesional
       const allReviews = await tx.review.findMany({
-        where: { professionalId }
+        where: { professionalId, tenantId: req.user!.tenantId }
       });
 
       const count = allReviews.length;
@@ -1534,7 +1558,15 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
 });
 
 // Iniciar servidor
-app.listen(port, () => {
-  console.log(`Backend Server running at http://localhost:${port}`);
-});
-
+app.use('/api/admin/mfa', adminMfaRouter(prisma, JWT_SECRET));
+app.use('/api/admin', adminRouter(prisma, JWT_SECRET));
+app.use('/api/platform', platformRouter(prisma, JWT_SECRET));
+app.use('/api/payments', transferRouter(prisma, JWT_SECRET));
+export { app, prisma };
+if (require.main === module) {
+  app.listen(port, () => console.log(`Backend Server running at http://localhost:${port}`));
+  const expiryTimer = setInterval(() => expirePendingPayments(prisma).catch(error => console.error('Payment expiry failed', error)), 60000);
+  expiryTimer.unref();
+  const throttleCleanupTimer = setInterval(() => pruneAuthAttempts(prisma).catch(error => console.error('Auth throttle cleanup failed', error)), 3600000);
+  throttleCleanupTimer.unref();
+}

@@ -4,12 +4,15 @@ import { Link } from 'react-router';
 import { SignUpModal } from './SignUpModal';
 import { POPULAR_SERVICES } from '../constants/services';
 import logoArtocamello from '@/assets/logoartocamello.png';
+import { adminRequest, AdminMe } from '@/services/adminService';
+import { logout as logoutService } from '@/services/authService';
 
 export function Header() {
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState(false);
   const [initialModalView, setInitialModalView] = useState<'login' | 'signup'>('signup');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userType, setUserType] = useState<string | null>(null);
+  const [hasAdmin, setHasAdmin] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileServicesOpen, setIsMobileServicesOpen] = useState(false);
 
@@ -17,6 +20,8 @@ export function Header() {
     const authStatus = sessionStorage.getItem('isAuthenticated') === 'true';
     setIsAuthenticated(authStatus);
     setUserType(sessionStorage.getItem('userType'));
+    setHasAdmin(false);
+    if (authStatus) adminRequest<AdminMe>('/me').then(() => setHasAdmin(true)).catch(() => setHasAdmin(false));
   };
 
   useEffect(() => {
@@ -88,6 +93,8 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
+            {hasAdmin && <Link to="/admin" className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Administración</Link>}
+
             {isAuthenticated && userType !== 'pro' && (
               <>
                 <Link to="/mis-solicitudes" className="text-[#62646A] font-medium hover:text-[#FFCA0C] transition-colors">
@@ -117,10 +124,7 @@ export function Header() {
             ) : (
               <button
                 onClick={() => {
-                  sessionStorage.removeItem('isAuthenticated');
-                  sessionStorage.removeItem('userType');
-                  sessionStorage.removeItem('userEmail');
-                  window.dispatchEvent(new Event('auth-status-changed'));
+                  logoutService();
                   window.location.href = '/';
                 }}
                 className="text-[#62646A] font-medium hover:text-red-500 transition-colors cursor-pointer"
@@ -181,6 +185,8 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
+            {hasAdmin && <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Administración</Link>}
+
             {isAuthenticated && userType !== 'pro' && (
               <>
                 <Link to="/mis-solicitudes" onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">
@@ -212,10 +218,7 @@ export function Header() {
             ) : (
               <button
                 onClick={() => {
-                  sessionStorage.removeItem('isAuthenticated');
-                  sessionStorage.removeItem('userType');
-                  sessionStorage.removeItem('userEmail');
-                  window.dispatchEvent(new Event('auth-status-changed'));
+                  logoutService();
                   window.location.href = '/';
                 }}
                 className="w-full text-center text-red-500 font-semibold text-lg py-3 border border-red-200 rounded-md hover:bg-red-50 transition-colors"

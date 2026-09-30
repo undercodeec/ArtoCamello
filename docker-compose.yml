@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: artocamello_dev
+      POSTGRES_USER: artocamello
+      POSTGRES_PASSWORD: artocamello_local_only
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - artocamello_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artocamello -d artocamello_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  artocamello_pgdata:

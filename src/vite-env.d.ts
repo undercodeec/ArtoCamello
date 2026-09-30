@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // Type declarations for custom imports
 // This file helps TypeScript understand non-standard module imports
 

@@ -31,7 +31,7 @@ export function Hero() {
   // Aquí es DONDE PUEDES EDITAR el tamaño y posición de CADA IMAGEN INDIVIDUALMENTE.
   // Puedes usar libremente cualquier propiedad CSS para ajustar la foto exactamente como necesites.
   // Propiedades útiles: top, bottom, left, right, height, width, objectPosition.
-  const heroImages = [
+  const heroImages: Array<{ src: string; bottom?: string; top?: string; left?: string; right?: string; height?: string; width?: string; objectPosition?: string; objectFit?: React.CSSProperties['objectFit'] }> = [
     {
       src: image_2fa8bfa24ba21b2ae0f081e8c66f8320be367828,
       bottom: '-150px',

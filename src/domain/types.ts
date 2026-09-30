@@ -96,6 +96,7 @@ export interface ServiceRequest {
   contactEmail: string;
   estimatedBudget: number;  // Presupuesto estimado del trabajo en USD
   costUSD?: number;         // Costo calculado por el backend (6% de estimatedBudget)
+  maxProfessionalsPerLead?: number;
   purchaseCount: number;    // Cuántos pros compraron este lead (máx 4)
   createdAt: string;
   updatedAt: string;
@@ -140,6 +141,16 @@ export interface PaymentHistoryItem {
   costUSD: number;
   payphoneTransactionId?: string;
   requestId: string;
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  link: string;
+  read: boolean;
+  createdAt: string;
 }
 
 // --- Display Helpers ---

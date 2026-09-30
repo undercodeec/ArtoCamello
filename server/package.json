@@ -8,7 +8,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:reconcile": "ts-node prisma/reconcile.ts",
+    "test:integration": "npm run build && node --test tests/admin.integration.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",

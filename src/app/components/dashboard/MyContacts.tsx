@@ -12,6 +12,7 @@ import { submitQuote, listQuotesByProfessional } from '@/services/quoteService';
 import { Quote } from '@/domain/types';
 import { getCurrentAuth } from '@/services/authService';
 import { getCategoryBySlug } from '@/services/categoryService';
+import { createCardIntent, getPaymentMethods } from '@/services/transferService';
 
 type Tab = 'inbox' | 'unlocked';
 
@@ -42,13 +43,18 @@ interface InboxCardProps {
   isLoading: boolean;
   error: string | null;
   onPay: (id: string) => void;
+  onCard: (id: string) => void;
+  transferAvailable: boolean;
+  payphoneAvailable: boolean;
+  cardAvailable: boolean;
 }
 
-function InboxCard({ job, isLoading, error, onPay }: InboxCardProps) {
+function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, payphoneAvailable, cardAvailable }: InboxCardProps) {
   const category = getCategoryBySlug(job.categorySlug);
   const costUSD = job.costUSD ?? Math.max(job.estimatedBudget * 0.06, 3);
-  const slotsLeft = MAX_PROFESSIONALS_PER_REQUEST - job.purchaseCount;
-  const limitReached = job.purchaseCount >= MAX_PROFESSIONALS_PER_REQUEST;
+  const maxProfessionals = job.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
+  const slotsLeft = maxProfessionals - job.purchaseCount;
+  const limitReached = job.purchaseCount >= maxProfessionals;
   const urgencyBadge = getUrgencyBadge(job.urgency);
 
   return (
@@ -108,7 +114,7 @@ function InboxCard({ job, isLoading, error, onPay }: InboxCardProps) {
             <p className="font-bold text-[#101828]">${job.estimatedBudget.toLocaleString('es-EC', { minimumFractionDigits: 0 })} USD</p>
           </div>
           <div className="flex-1 bg-[#FFCA0C]/10 rounded-xl p-3">
-            <p className="text-xs text-[#8B6B00] mb-0.5">Tu inversión (6%)</p>
+            <p className="text-xs text-[#8B6B00] mb-0.5">Costo por contacto</p>
             <p className="font-bold text-[#101828]">${costUSD.toFixed(2)} USD</p>
           </div>
         </div>
@@ -119,13 +125,13 @@ function InboxCard({ job, isLoading, error, onPay }: InboxCardProps) {
         <div className="flex justify-between text-xs text-gray-500 mb-1.5">
           <span>Profesionales interesados</span>
           <span className="font-semibold text-[#101828]">
-            {job.purchaseCount} / {MAX_PROFESSIONALS_PER_REQUEST} cupos
+            {job.purchaseCount} / {maxProfessionals} cupos
           </span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-1.5">
           <div
             className={`h-1.5 rounded-full transition-all ${slotsLeft <= 1 ? 'bg-red-500' : 'bg-[#FFCA0C]'}`}
-            style={{ width: `${(job.purchaseCount / MAX_PROFESSIONALS_PER_REQUEST) * 100}%` }}
+            style={{ width: `${(job.purchaseCount / maxProfessionals) * 100}%` }}
           />
         </div>
         {slotsLeft === 1 && (
@@ -149,7 +155,7 @@ function InboxCard({ job, isLoading, error, onPay }: InboxCardProps) {
             Cupos agotados — No disponible
           </div>
         ) : (
-          <button
+          <div className="grid gap-2">{payphoneAvailable && <button
             onClick={() => onPay(job.id)}
             disabled={isLoading}
             id={`btn-pay-lead-${job.id}`}
@@ -173,7 +179,7 @@ function InboxCard({ job, isLoading, error, onPay }: InboxCardProps) {
                 Ver datos del cliente — ${costUSD.toFixed(2)} USD
               </>
             )}
-          </button>
+          </button>}{cardAvailable && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl disabled:opacity-50" onClick={() => onCard(job.id)}>Pagar con tarjeta</button>}{transferAvailable && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}`; }}>Pagar por transferencia</button>}{!payphoneAvailable && !transferAvailable && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
         )}
       </div>
     </div>
@@ -365,6 +371,9 @@ export function MyContacts() {
   const [inboxJobs, setInboxJobs] = useState<ServiceRequest[]>([]);
   const [inboxLoading, setInboxLoading] = useState(true);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [transferAvailable, setTransferAvailable] = useState(false);
+  const [payphoneAvailable, setPayphoneAvailable] = useState(false);
+  const [cardAvailable, setCardAvailable] = useState(false);
   const [payError, setPayError] = useState<{ id: string; msg: string } | null>(null);
 
   // Unlocked contacts (already paid)
@@ -396,6 +405,7 @@ export function MyContacts() {
 
   useEffect(() => {
     loadData();
+    getPaymentMethods().then(methods => { setTransferAvailable(methods.transfer); setPayphoneAvailable(methods.payphone); setCardAvailable(methods.card); }).catch(() => { setTransferAvailable(false); setPayphoneAvailable(false); setCardAvailable(false); });
   }, [loadData]);
 
   const handleQuoteSubmit = async (payload: any) => {
@@ -417,6 +427,14 @@ export function MyContacts() {
       return;
     }
     window.location.href = result.redirectUrl;
+  };
+  const handleCardPay = async (jobId: string) => {
+    setPayingId(jobId); setPayError(null);
+    try {
+      const result = await createCardIntent(jobId);
+      if (!result.checkoutUrl) throw new Error('El checkout está en preparación. Intenta de nuevo en unos segundos.');
+      window.location.href = result.checkoutUrl;
+    } catch (error) { setPayError({ id: jobId, msg: (error as Error).message }); setPayingId(null); }
   };
 
   // Filtered inbox
@@ -472,7 +490,7 @@ export function MyContacts() {
           <p className="text-sm font-semibold text-blue-800">¿Cómo funciona?</p>
           <p className="text-sm text-blue-700 mt-0.5">
             Ves la descripción y ubicación del trabajo. El nombre, teléfono y correo del cliente se revelan
-            únicamente cuando pagas el <strong>6% del presupuesto estimado</strong> del trabajo.
+            únicamente cuando pagas el <strong>costo indicado</strong> para ese contacto.
           </p>
         </div>
       </div>
@@ -561,6 +579,10 @@ export function MyContacts() {
                   isLoading={payingId === job.id}
                   error={payError?.id === job.id ? payError.msg : null}
                   onPay={handlePay}
+                  onCard={handleCardPay}
+                  transferAvailable={transferAvailable}
+                  payphoneAvailable={payphoneAvailable}
+                  cardAvailable={cardAvailable}
                 />
               ))}
             </div>

@@ -2,14 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { Receipt, Download, FileText, DollarSign, ExternalLink } from 'lucide-react';
 import { PaymentHistoryItem } from '@/domain/types';
 import { getPaymentHistory } from '@/services/leadService';
+import { listMyCards, listMyTransfers, TransferPayment } from '@/services/transferService';
+import { Link } from 'react-router';
 
 export function WalletBilling() {
   const [activeTab, setActiveTab] = useState<'payments' | 'billing'>('payments');
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
+  const [transfers, setTransfers] = useState<Array<TransferPayment & { metadata: { requestId?: string } }>>([]);
+  const [cards, setCards] = useState<Array<TransferPayment & { metadata: { requestId?: string } }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadPayments();
+    listMyTransfers().then(setTransfers).catch(() => setTransfers([]));
+    listMyCards().then(setCards).catch(() => setCards([]));
+    const timer = window.setInterval(() => listMyCards().then(setCards).catch(() => {}), 15000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const loadPayments = async () => {
@@ -27,6 +35,9 @@ export function WalletBilling() {
         <h1 className="text-3xl font-bold text-[#101828]">Facturación y Pagos</h1>
         <p className="text-gray-500 mt-1">Revisa tus pagos realizados y tus datos de facturación SRI.</p>
       </div>
+
+      {transfers.length > 0 && <div className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-3">Mis transferencias</h2><div className="space-y-2">{transfers.map(p => <div key={p.id} className="flex flex-wrap justify-between gap-2 border-t pt-2 text-sm"><span>{p.reference} · ${Number(p.amount).toFixed(2)} USD · {p.status}</span><Link className="underline text-blue-700" to={`/dashboard/transfer/${p.metadata.requestId || ''}?paymentId=${p.id}`}>Ver estado</Link></div>)}</div></div>}
+      {cards.length > 0 && <div className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-3">Mis pagos con tarjeta</h2><p className="text-sm text-gray-500 mb-2">El contacto aparece desbloqueado cuando el proveedor confirma el pago.</p><div className="space-y-2">{cards.map(p => <div key={p.id} className="flex flex-wrap justify-between gap-2 border-t pt-2 text-sm"><span>{p.reference} · ${Number(p.amount).toFixed(2)} USD · {p.status === 'allocated' ? 'Contacto desbloqueado' : p.status === 'approved' ? 'Pago recibido, requiere revisión' : p.status === 'pending_provider' ? 'Esperando confirmación' : p.status === 'expired' ? 'Vencido' : p.status}</span>{p.status === 'allocated' && <Link className="underline text-blue-700" to="/dashboard/contacts">Ver contacto</Link>}</div>)}</div></div>}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200">
@@ -63,7 +74,7 @@ export function WalletBilling() {
               </div>
               <div>
                 <p className="text-sm text-gray-500 mb-1">Tasa de comisión</p>
-                <p className="text-2xl font-bold text-[#101828]">6%</p>
+                <p className="text-2xl font-bold text-[#101828]">Variable</p>
                 <p className="text-sm text-gray-400">del presupuesto estimado del trabajo</p>
               </div>
             </div>

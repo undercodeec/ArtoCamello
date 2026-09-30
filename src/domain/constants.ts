@@ -3,7 +3,7 @@
 // ====================================================================
 
 /** Maximum number of professionals that can purchase contact for a single request */
-export const MAX_PROFESSIONALS_PER_REQUEST = 6;
+export const MAX_PROFESSIONALS_PER_REQUEST = 4;
 
 /** Fee rate charged to professionals as a % of the estimated budget (6%) */
 export const LEAD_FEE_RATE = 0.06;

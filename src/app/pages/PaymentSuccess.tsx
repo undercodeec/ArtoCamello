@@ -17,7 +17,7 @@ export function PaymentSuccess() {
   useEffect(() => {
     let mounted = true;
 
-    const clientTxId = searchParams.get('clientTxId');
+    const clientTxId = searchParams.get('clientTransactionId') || searchParams.get('clientTxId');
     const payphoneTransactionId = searchParams.get('id') || undefined;
 
     if (!clientTxId) {

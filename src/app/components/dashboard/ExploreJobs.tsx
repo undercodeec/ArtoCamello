@@ -6,6 +6,7 @@ import { listMatchingRequestsForProfessional } from '@/services/requestService';
 import { initiateLeadPayment, hasPurchasedLead } from '@/services/leadService';
 import { getCurrentAuth } from '@/services/authService';
 import { getCategoryBySlug, getAllCategories } from '@/services/categoryService';
+import { createCardIntent, getPaymentMethods } from '@/services/transferService';
 
 export function ExploreJobs() {
   const [filterCategory, setFilterCategory] = useState('');
@@ -13,12 +14,16 @@ export function ExploreJobs() {
   const [jobs, setJobs] = useState<ServiceRequest[]>([]);
   const [purchasedSet, setPurchasedSet] = useState<Set<string>>(new Set());
   const [loadingPayment, setLoadingPayment] = useState<string | null>(null);
+  const [transferAvailable, setTransferAvailable] = useState(false);
+  const [payphoneAvailable, setPayphoneAvailable] = useState(false);
+  const [cardAvailable, setCardAvailable] = useState(false);
   const [errorMsg, setErrorMsg] = useState<{ id: string; msg: string } | null>(null);
   const auth = getCurrentAuth();
   const categories = getAllCategories();
 
   useEffect(() => {
     loadJobs();
+    getPaymentMethods().then(methods => { setTransferAvailable(methods.transfer); setPayphoneAvailable(methods.payphone); setCardAvailable(methods.card); }).catch(() => { setTransferAvailable(false); setPayphoneAvailable(false); setCardAvailable(false); });
   }, []);
 
   const loadJobs = async () => {
@@ -48,6 +53,15 @@ export function ExploreJobs() {
 
     // Redirigir al profesional a PayPhone
     window.location.href = result.redirectUrl;
+  };
+
+  const handleCardUnlock = async (jobId: string) => {
+    setLoadingPayment(jobId); setErrorMsg(null);
+    try {
+      const result = await createCardIntent(jobId);
+      if (!result.checkoutUrl) throw new Error('El checkout está en preparación. Intenta de nuevo en unos segundos.');
+      window.location.href = result.checkoutUrl;
+    } catch (error) { setErrorMsg({ id: jobId, msg: (error as Error).message }); setLoadingPayment(null); }
   };
 
   const getUrgencyColor = (urgency: UrgencyLevel) => {
@@ -89,7 +103,7 @@ export function ExploreJobs() {
         {/* Info modelo de negocio */}
         <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <DollarSign className="w-4 h-4" />
-          Se cobra un 6% del presupuesto del trabajo
+          El costo por contacto se muestra en cada oportunidad
         </div>
       </div>
 
@@ -134,8 +148,9 @@ export function ExploreJobs() {
             // costUSD viene del backend ya calculado; si no, calculamos localmente
             const costUSD = job.costUSD ?? Math.max(job.estimatedBudget * 0.06, 3);
             const already = purchasedSet.has(job.id);
-            const limitReached = job.purchaseCount >= MAX_PROFESSIONALS_PER_REQUEST;
-            const slotsLeft = MAX_PROFESSIONALS_PER_REQUEST - job.purchaseCount;
+            const maxProfessionals = job.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
+            const limitReached = job.purchaseCount >= maxProfessionals;
+            const slotsLeft = maxProfessionals - job.purchaseCount;
             const isLoading = loadingPayment === job.id;
 
             return (
@@ -180,13 +195,13 @@ export function ExploreJobs() {
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-sm font-medium text-gray-700">Competencia:</span>
                       <span className="text-sm font-bold text-[#101828]">
-                        {job.purchaseCount} de {MAX_PROFESSIONALS_PER_REQUEST} presupuestos
+                        {job.purchaseCount} de {maxProfessionals} presupuestos
                       </span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
                       <div
                         className={`h-2 rounded-full ${slotsLeft <= 1 ? 'bg-red-500' : 'bg-[#FFCA0C]'}`}
-                        style={{ width: `${(job.purchaseCount / MAX_PROFESSIONALS_PER_REQUEST) * 100}%` }}
+                        style={{ width: `${(job.purchaseCount / maxProfessionals) * 100}%` }}
                       ></div>
                     </div>
                     {slotsLeft === 1 && (
@@ -218,7 +233,7 @@ export function ExploreJobs() {
                       No disponible — Límite alcanzado
                     </div>
                   ) : (
-                    <button
+                    <div className="grid gap-2">{payphoneAvailable && <button
                       onClick={() => handleUnlock(job.id)}
                       disabled={isLoading}
                       id={`btn-unlock-${job.id}`}
@@ -242,7 +257,7 @@ export function ExploreJobs() {
                           Pagar ${costUSD.toFixed(2)} USD — Desbloquear
                         </>
                       )}
-                    </button>
+                    </button>}{cardAvailable && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg disabled:opacity-50" onClick={() => handleCardUnlock(job.id)}>Pagar con tarjeta</button>}{transferAvailable && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}`; }}>Pagar por transferencia</button>}{!payphoneAvailable && !transferAvailable && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
                   )}
                 </div>
               </div>

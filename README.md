@@ -128,14 +128,15 @@ src/
 | Cliente | `cliente@artocamello.com` | `password123` |
 | Profesional | `pro@artocamello.com` | `password123` |
 
-## Pendiente para Backend
+## Administración y pagos
 
-- [ ] API REST real (Node.js/FastAPI/etc.)
-- [ ] Integración PayPhone para pagos
-- [ ] Sistema de notificaciones push/email reales
-- [ ] Upload de imágenes (portfolio, avatar)
-- [ ] Búsqueda geoespacial por zonas
-- [ ] Panel de administración
-- [ ] Validación de identidad/verificación de profesionales
-- [ ] Chat/mensajería entre cliente y profesional
-- [ ] Facturación electrónica SRI
+El panel está en `/admin`. La API administrativa usa membresías por tenant, permisos por operación, MFA TOTP y auditoría. Los profesionales pueden pagar por PayPhone o enviar una transferencia que desbloquea el contacto después de la aprobación.
+
+Consulta [ADMIN_OPERACION.md](ADMIN_OPERACION.md) para migraciones, roles, cuenta inicial, configuración bancaria y conciliación. La integración provisional de tarjeta con Kushki y sus requisitos de activación están en [server/docs/CARD_PROVIDER.md](server/docs/CARD_PROVIDER.md). Los pasos pendientes antes de producción están en [server/docs/PRODUCTION_CHECKLIST.md](server/docs/PRODUCTION_CHECKLIST.md).
+
+## Otros pendientes
+
+- Procedimiento operativo de recuperación MFA, escáner de comprobantes y retención de datos antes de producción.
+- Contrato, credenciales y pruebas sandbox reales del proveedor de tarjeta antes de activarla.
+- Notificaciones push, carga de imágenes de perfil y búsqueda geográfica.
+- Chat entre cliente y profesional y facturación electrónica SRI.

@@ -6,6 +6,7 @@ import image_fb32730281815c0feebcfe4031ae69e8b144e389 from 'figma:asset/fb327302
 import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
 import { useGoogleLogin } from '@react-oauth/google';
+import { adminRequest } from '@/services/adminService';
 
 const GoogleIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -79,7 +80,10 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
       if (isLoginView) {
         const user = await login(email, password);
         onClose();
-        if (user.role === UserRole.PROFESSIONAL) {
+        const isAdmin = await adminRequest('/me').then(() => true).catch(() => false);
+        const pendingAdmin = !isAdmin && await adminRequest<{ pending: boolean }>('/invitations/pending').then(value => value.pending).catch(() => false);
+        if (isAdmin || pendingAdmin) navigate('/admin');
+        else if (user.role === UserRole.PROFESSIONAL) {
           navigate('/dashboard');
         } else {
           // Si es cliente, se queda donde está o va a perfil
@@ -129,7 +133,10 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         // Por defecto para simplificar, usamos isLoginView ? null : 'pro/client', pero lo enviaremos al fallback del backend.
         const user = await googleLogin(credentialResponse.credential);
         onClose();
-        if (user.role === UserRole.PROFESSIONAL) {
+        const isAdmin = await adminRequest('/me').then(() => true).catch(() => false);
+        const pendingAdmin = !isAdmin && await adminRequest<{ pending: boolean }>('/invitations/pending').then(value => value.pending).catch(() => false);
+        if (isAdmin || pendingAdmin) navigate('/admin');
+        else if (user.role === UserRole.PROFESSIONAL) {
           navigate('/dashboard');
         } else {
           navigate('/onboarding');
