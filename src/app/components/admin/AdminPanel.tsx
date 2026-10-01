@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { adminRequest, AdminMe, Payment } from '@/services/adminService';
 import { adminUrl, publicAppUrl } from '@/app/adminHost';
 import { getCurrentUser, logout } from '@/services/authService';
-import { Bell, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, Settings2, ShieldCheck, Users, UserRound, X } from 'lucide-react';
+import { Bell, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, Settings2, ShieldCheck, Users as UsersIcon, UserRound, X } from 'lucide-react';
 
 type List<T> = { items: T[]; total: number };
 const money = (amount: string | number, currency = 'USD') => `${Number(amount).toFixed(2)} ${currency}`;
@@ -22,7 +22,7 @@ const nav = [
 ];
 const navIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   '/': LayoutDashboard, '/payments/transfers': CreditCard, '/payments': ClipboardList,
-  '/users/clients': Users, '/users/professionals': UserRound, '/access/admins': ShieldCheck,
+  '/users/clients': UsersIcon, '/users/professionals': UserRound, '/access/admins': ShieldCheck,
   '/access/roles': ShieldCheck, '/settings': Settings2, '/audit': ClipboardList,
 };
 const input = 'border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm';
