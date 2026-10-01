@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { adminRouter } from './admin';
 import { adminMfaRouter } from './adminMfaRouter';
+import { adminEmailCodeRouter } from './adminEmailCodeRouter';
 import { validateMfaConfig } from './adminMfa';
 import { transferRouter } from './transfers';
 import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl } from './payments';
@@ -52,7 +53,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Session', 'Idempotency-Key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Session', 'X-Admin-Email-Session', 'Idempotency-Key']
 }));
 app.use('/api/webhooks/kushki', kushkiWebhookRouter(prisma));
 app.use(express.json({ limit: '10mb' }));
@@ -1566,6 +1567,7 @@ const adminHostGuard = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 app.use('/api/admin/mfa', adminHostGuard, adminMfaRouter(prisma, JWT_SECRET));
+app.use('/api/admin/access-code', adminHostGuard, adminEmailCodeRouter(prisma, JWT_SECRET));
 app.use('/api/admin', adminHostGuard, adminRouter(prisma, JWT_SECRET));
 app.use('/api/platform', platformRouter(prisma, JWT_SECRET));
 app.use('/api/payments', transferRouter(prisma, JWT_SECRET));

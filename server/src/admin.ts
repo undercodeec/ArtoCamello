@@ -7,7 +7,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import nodemailer from 'nodemailer';
 import bcrypt from 'bcrypt';
-import { adminMfaRequired, verifyAdminSession } from './adminMfa';
+import { adminEmailCodeRequired, adminMfaRequired, verifyAdminEmailSession, verifyAdminSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 
 type Context = { tenantId: string; actorId: string; permissions: Set<string>; role: string };
@@ -88,6 +88,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (!tenantId) { res.status(404).end(); return; }
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } }, include: { role: { include: { permissions: { include: { permission: true } } } } } });
     if (!membership || membership.status !== 'active' || membership.role.tenantId !== tenantId) { res.status(403).json({ error: 'Sin membresía activa en este tenant' }); return; }
+    if (adminEmailCodeRequired() && !verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma el código enviado a tu correo para acceder al panel', code: 'EMAIL_CODE_REQUIRED' }); return; }
     if (adminMfaRequired()) {
       if (!user.mfaSecret) { res.status(403).json({ error: 'Configura MFA para acceder al panel', code: 'MFA_SETUP_REQUIRED' }); return; }
       if (!verifyAdminSession(req.header('x-admin-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma tu código MFA para acceder al panel', code: 'MFA_REQUIRED' }); return; }

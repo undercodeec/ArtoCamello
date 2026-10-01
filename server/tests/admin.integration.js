@@ -7,6 +7,7 @@ process.env.PAYPHONE_TOKEN = '';
 process.env.PAYPHONE_STORE_ID = '';
 process.env.PAYPHONE_MOCK = 'true';
 process.env.ADMIN_MFA_REQUIRED = 'false';
+process.env.ADMIN_EMAIL_CODE_REQUIRED = 'false';
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const http = require('node:http');
@@ -96,9 +97,10 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
       assert.equal(googleLogin.status, 200);
       assert.equal('verificationToken' in (await googleLogin.json()).user, false);
     } finally { global.fetch = originalGoogleFetch; }
-    const preflight = await fetch(`${base}/api/payments/card-intents`, { method: 'OPTIONS', headers: { Origin: `https://${hostA}`, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,idempotency-key' } });
+    const preflight = await fetch(`${base}/api/payments/card-intents`, { method: 'OPTIONS', headers: { Origin: `https://${hostA}`, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-admin-email-session,idempotency-key' } });
     assert.equal(preflight.status, 204);
     assert.match(preflight.headers.get('access-control-allow-headers') || '', /Idempotency-Key/i);
+    assert.match(preflight.headers.get('access-control-allow-headers') || '', /X-Admin-Email-Session/i);
     const ownProfile = await call('/api/profile', ids.a);
     assert.equal(ownProfile.status, 200);
     assert.equal('mfaSecret' in (await ownProfile.json()).user, false);
@@ -382,6 +384,29 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: 'bad', password: 'short', fullName: 'A' })).status, 400);
     for (let attempt = 0; attempt < 20; attempt++) assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 400);
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 429);
+
+    const previousSmtpUser = process.env.SMTP_USER;
+    const previousSmtpPass = process.env.SMTP_PASS;
+    delete process.env.SMTP_USER;
+    delete process.env.SMTP_PASS;
+    process.env.ADMIN_EMAIL_CODE_REQUIRED = 'true';
+    try {
+      const emailRequired = await call('/api/admin/me', ids.a);
+      assert.equal(emailRequired.status, 403);
+      assert.equal((await emailRequired.json()).code, 'EMAIL_CODE_REQUIRED');
+      assert.equal((await call('/api/admin/access-code/request', ids.a, 'POST', {})).status, 503);
+      const code = '123456';
+      await db.adminAccessCode.create({ data: { tenantId: tenantA, userId: ids.a, codeHash: crypto.createHmac('sha256', process.env.JWT_SECRET || 'super-secret-jwt-key-change-me').update(`${ids.a}:${tenantA}:${code}`).digest('hex'), expiresAt: new Date(Date.now() + 60000) } });
+      assert.equal((await call('/api/admin/access-code/verify', ids.a, 'POST', { code: code === '000000' ? '000001' : '000000' })).status, 401);
+      const verifiedEmail = await call('/api/admin/access-code/verify', ids.a, 'POST', { code });
+      assert.equal(verifiedEmail.status, 200);
+      const { adminEmailSession } = await verifiedEmail.json();
+      assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Email-Session': adminEmailSession })).status, 200);
+    } finally {
+      if (previousSmtpUser === undefined) delete process.env.SMTP_USER; else process.env.SMTP_USER = previousSmtpUser;
+      if (previousSmtpPass === undefined) delete process.env.SMTP_PASS; else process.env.SMTP_PASS = previousSmtpPass;
+      process.env.ADMIN_EMAIL_CODE_REQUIRED = 'false';
+    }
 
     process.env.ADMIN_MFA_REQUIRED = 'true';
     const mfaRequired = await call('/api/admin/me', ids.a);

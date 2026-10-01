@@ -132,7 +132,7 @@ src/
 
 ## Administración y pagos
 
-El panel está en `https://admin.artocamello.com`; el sitio público no publica rutas administrativas. La API administrativa usa membresías por tenant, permisos por operación, MFA TOTP y auditoría. Los profesionales pueden pagar por PayPhone o enviar una transferencia que desbloquea el contacto después de la aprobación.
+El panel está en `https://admin.artocamello.com`; el sitio público no publica rutas administrativas. La API administrativa usa membresías por tenant, permisos por operación, un código enviado al correo administrativo, MFA TOTP y auditoría. Los profesionales pueden pagar por PayPhone o enviar una transferencia que desbloquea el contacto después de la aprobación.
 
 Para producción, cree el DNS de `admin.artocamello.com` hacia el frontend, incluya ese host en `ADMIN_HOSTNAMES=admin.artocamello.com` y `ADMIN_APP_BASE_URL=https://admin.artocamello.com` en el API, y emita su certificado TLS. El mismo host debe existir en `TenantDomain` para resolver el tenant; el `seed` ya lo registra para ArtoCamello. Configure `VITE_ADMIN_URL` y `VITE_PUBLIC_APP_URL` antes de construir el frontend. En local puede usar `http://admin.localhost:5173` con `VITE_ADMIN_URL` y `ADMIN_APP_BASE_URL`, y ejecutar el API sin `ADMIN_HOSTNAMES`.
 

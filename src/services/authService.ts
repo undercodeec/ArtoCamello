@@ -23,6 +23,10 @@ function getAuthState(): AuthState {
 }
 
 function setAuthState(state: AuthState): void {
+  if (state.isAuthenticated) {
+    sessionStorage.removeItem('adminSession');
+    sessionStorage.removeItem('adminEmailSession');
+  }
   sessionStorage.setItem(AUTH_KEY, JSON.stringify(state));
   // Keep legacy keys for components that might still use them directly
   if (state.isAuthenticated && state.token) {
@@ -208,6 +212,7 @@ export function logout(): void {
   setAuthState({ isAuthenticated: false, userId: null, role: UserRole.GUEST, email: null, token: null });
   sessionStorage.removeItem('cachedUser');
   sessionStorage.removeItem('adminSession');
+  sessionStorage.removeItem('adminEmailSession');
 }
 
 /** Get current auth state */

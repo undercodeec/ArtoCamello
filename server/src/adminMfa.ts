@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 export const adminMfaRequired = () => process.env.NODE_ENV === 'production' || process.env.ADMIN_MFA_REQUIRED !== 'false';
+export const adminEmailCodeRequired = () => process.env.NODE_ENV === 'production' || process.env.ADMIN_EMAIL_CODE_REQUIRED !== 'false';
 
 function encryptionKey(jwtSecret: string): Buffer {
   const configured = process.env.MFA_ENCRYPTION_KEY;
@@ -82,6 +83,17 @@ export function issueAdminSession(userId: string, tenantId: string, version: num
 export function verifyAdminSession(token: string | undefined, userId: string, tenantId: string, version: number, jwtSecret: string): boolean {
   try {
     const claims = jwt.verify(token || '', jwtSecret, { audience: 'admin-mfa' }) as jwt.JwtPayload;
+    return claims.userId === userId && claims.tenantId === tenantId && claims.sessionVersion === version;
+  } catch { return false; }
+}
+
+export function issueAdminEmailSession(userId: string, tenantId: string, version: number, jwtSecret: string): string {
+  return jwt.sign({ userId, tenantId, sessionVersion: version }, jwtSecret, { audience: 'admin-email', expiresIn: '30m' });
+}
+
+export function verifyAdminEmailSession(token: string | undefined, userId: string, tenantId: string, version: number, jwtSecret: string): boolean {
+  try {
+    const claims = jwt.verify(token || '', jwtSecret, { audience: 'admin-email' }) as jwt.JwtPayload;
     return claims.userId === userId && claims.tenantId === tenantId && claims.sessionVersion === version;
   } catch { return false; }
 }

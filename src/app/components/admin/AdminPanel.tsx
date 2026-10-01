@@ -36,10 +36,12 @@ export function AdminPanel() {
   const navigate = useNavigate();
   const [me, setMe] = useState<AdminMe | null>(null);
   const [error, setError] = useState('');
+  const [emailCode, setEmailCode] = useState(false);
   const [mfa, setMfa] = useState<'setup' | 'verify' | null>(null);
-  const loadAccess = () => adminRequest<AdminMe>('/me').then(value => { setMe(value); setError(''); setMfa(null); }).catch((e: Error & { code?: string }) => { if (e.code === 'MFA_SETUP_REQUIRED') setMfa('setup'); else if (e.code === 'MFA_REQUIRED') setMfa('verify'); else setError(e.message); });
+  const loadAccess = () => adminRequest<AdminMe>('/me').then(value => { setMe(value); setError(''); setEmailCode(false); setMfa(null); }).catch((e: Error & { code?: string }) => { if (e.code === 'EMAIL_CODE_REQUIRED') setEmailCode(true); else if (e.code === 'MFA_SETUP_REQUIRED') setMfa('setup'); else if (e.code === 'MFA_REQUIRED') setMfa('verify'); else setError(e.message); });
   useEffect(() => { loadAccess(); }, []);
   useEffect(() => { const listener = (event: Event) => setMfa((event as CustomEvent<string>).detail === 'MFA_SETUP_REQUIRED' ? 'setup' : 'verify'); window.addEventListener('admin-mfa-required', listener); return () => window.removeEventListener('admin-mfa-required', listener); }, []);
+  if (emailCode) return <EmailCodeGate onReady={loadAccess} />;
   if (mfa) return <MfaGate mode={mfa} onReady={loadAccess} />;
   if (error) return <main className="min-h-screen grid place-items-center p-8"><div className="bg-white p-8 rounded-xl shadow max-w-md"><h1 className="text-xl font-bold mb-2">Acceso administrativo</h1><p>{error}</p><button className={`${button} mt-4`} onClick={() => adminRequest('/invitations/accept', { method: 'POST' }).then(() => adminRequest<AdminMe>('/me')).then(value => { setMe(value); setError(''); }).catch(e => setError(e.message))}>Aceptar invitación pendiente</button><Link to="/login" className="underline mt-4 block">Iniciar sesión con otra cuenta</Link></div></main>;
   if (!me) return <main className="p-8">Verificando acceso...</main>;
@@ -67,6 +69,35 @@ export function AdminPanel() {
       {!selected && <div><h1 className="text-2xl font-bold">Página no encontrada</h1><button onClick={() => navigate('/')} className={button}>Ir al inicio</button></div>}
     </main>
   </div>;
+}
+
+function EmailCodeGate({ onReady }: { onReady: () => void }) {
+  const [code, setCode] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true); setError('');
+    try { await adminRequest('/access-code/request', { method: 'POST' }); setMessage('Enviamos un código de seis dígitos a tu correo registrado.'); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  const verify = async () => {
+    setBusy(true); setError('');
+    try {
+      const response = await adminRequest<{ adminEmailSession: string }>('/access-code/verify', { method: 'POST', body: JSON.stringify({ code }) });
+      sessionStorage.setItem('adminEmailSession', response.adminEmailSession);
+      onReady();
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  return <main className="min-h-screen bg-[#f6f7f9] grid place-items-center p-6"><div className="bg-white border rounded-xl p-6 w-full max-w-md space-y-4">
+    <h1 className="text-2xl font-bold">Confirma tu correo</h1>
+    <p>Para ingresar al panel, solicita y confirma un código enviado a tu correo administrativo.</p>
+    <button className={button} disabled={busy} onClick={send}>{message ? 'Reenviar código' : 'Enviar código'}</button>
+    <label className="block text-sm">Código de seis dígitos<input className={`${input} block w-full mt-1`} autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))} /></label>
+    <button className={button} disabled={busy || code.length !== 6} onClick={verify}>Continuar</button>
+    {message && <p className="text-green-700">{message}</p>}
+    {error && <p className="text-red-700">{error}</p>}
+  </div></main>;
 }
 
 function MfaGate({ mode, onReady }: { mode: 'setup' | 'verify'; onReady: () => void }) {
@@ -117,7 +148,7 @@ function Payments({ transfers = false, permissions }: { transfers?: boolean; per
   const path = `/payments${transfers ? '/transfers' : ''}?page=${page}&${query}`;
   const { data, error, loading, reload } = useData<List<Payment>>(path);
   const exportCsv = async () => {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/admin/payments/export.csv?${query}${transfers ? '&method=transfer' : ''}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/admin/payments/export.csv?${query}${transfers ? '&method=transfer' : ''}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
     if (!response.ok) { alert('No se pudo exportar'); return; }
     const url = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = url; a.download = 'pagos.csv'; a.click(); URL.revokeObjectURL(url);
   };
@@ -134,7 +165,7 @@ function PaymentDetail({ id, canReview, onClose, onChanged }: { id: string; canR
   const openProof = async (url: string) => {
     const tab = window.open('', '_blank');
     try {
-      const response = await fetch(`${(import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '')}${url}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
+      const response = await fetch(`${(import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '')}${url}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
       if (!response.ok) throw new Error('No se pudo abrir el comprobante');
       const objectUrl = URL.createObjectURL(await response.blob()); if (tab) tab.location.href = objectUrl; setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
     } catch (error) { tab?.close(); setMessage((error as Error).message); }

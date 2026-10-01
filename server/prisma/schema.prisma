@@ -59,6 +59,7 @@ model User {
   reviewsMade        Review[]             @relation("ClientReviews")
   reviewsReceived    Review[]             @relation("ProfessionalReviews")
   memberships        TenantMembership[]
+  adminAccessCodes   AdminAccessCode[]
   payments           Payment[]
   auditActions       AuditLog[]
   submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
@@ -254,12 +255,28 @@ model Tenant {
   purchases            LeadPurchase[]
   quotes               Quote[]
   memberships          TenantMembership[]
+  adminAccessCodes     AdminAccessCode[]
   roles                AdminRole[]
   auditLogs            AuditLog[]
   payments             Payment[]
   files                StoredFile[]
   allocations          PaymentAllocation[]
   events               PaymentEvent[]
+}
+
+model AdminAccessCode {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, userId])
+  @@index([expiresAt])
 }
 
 model TenantDomain {
