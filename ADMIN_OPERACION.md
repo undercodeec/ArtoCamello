@@ -12,8 +12,8 @@
 ## Puesta en marcha local
 
 1. Para PostgreSQL local reproducible, ejecuta `docker compose up -d db` en la raíz y copia `server/.env.example` a `server/.env`. Configura `DATABASE_URL` y `JWT_SECRET` según tu entorno. Para crear un dueño inicial, define `ADMIN_SEED_EMAIL` y `ADMIN_SEED_PASSWORD` (mínimo 14 caracteres). Para el dueño global de desarrollo usa `PLATFORM_OWNER_EMAIL` y `PLATFORM_OWNER_PASSWORD` (mínimo 16 caracteres). Usa correos distintos.
-2. En `server/`: `npm install`, `npx prisma migrate deploy`, `npx prisma generate`, `npm run prisma:seed`, `npm run prisma:reconcile`, `npm run dev`.
-3. En la raíz: `npm install` y `npm run dev`. Para desarrollo local, define `VITE_ADMIN_URL=http://admin.localhost:5173`, entra con el correo sembrado y abre `http://admin.localhost:5173`.
+2. En `server/`: `pnpm install`, `pnpm exec prisma migrate deploy`, `pnpm exec prisma generate`, `pnpm prisma:seed`, `pnpm prisma:reconcile`, `pnpm dev`.
+3. En la raíz: `pnpm install` y `pnpm dev`. Para desarrollo local, define `VITE_ADMIN_URL=http://admin.localhost:5173`, entra con el correo sembrado y abre `http://admin.localhost:5173`.
 4. Configura una cuenta bancaria receptora. Solo entonces el profesional verá las instrucciones de transferencia.
 
 `PAYPHONE_MOCK=true` habilita el flujo simulado únicamente fuera de producción. En producción usa `NODE_ENV=production`, credenciales reales de PayPhone y `PAYPHONE_MOCK` desactivado.
@@ -24,7 +24,7 @@ El panel exige MFA TOTP para todas las membresías administrativas. En el primer
 
 Para invitar a un administrador nuevo, configura `SMTP_USER` y `SMTP_PASS`. El enlace enviado por correo dura siete días y permite crear una contraseña; después el invitado inicia sesión. Si el usuario ya tiene una cuenta verificada, recibe un enlace al subdominio administrativo y acepta la membresía allí.
 
-La migración conserva `LeadPurchase` y sus campos PayPhone heredados. `npm run prisma:reconcile` compara cantidades, importes y referencias de compras pagadas con las asignaciones nuevas. Detén el despliegue si reporta diferencias. En la base local durante esta implementación había 0 compras pagadas, así que el cotejo dio 0/0.
+La migración conserva `LeadPurchase` y sus campos PayPhone heredados. `pnpm prisma:reconcile` compara cantidades, importes y referencias de compras pagadas con las asignaciones nuevas. Detén el despliegue si reporta diferencias. En la base local durante esta implementación había 0 compras pagadas, así que el cotejo dio 0/0.
 
 ## Revisión de transferencias
 

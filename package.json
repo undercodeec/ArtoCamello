@@ -2,11 +2,18 @@
   "name": "artocamello-marketplace",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:server": "pnpm --dir server dev",
+    "build:server": "pnpm --dir server build",
+    "test:integration": "pnpm --dir server test:integration"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

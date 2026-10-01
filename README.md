@@ -14,18 +14,20 @@ Marketplace que conecta clientes con profesionales locales a través de un siste
 
 ## Cómo Ejecutar
 
+El proyecto usa **pnpm 11.24.0** y Node.js 22 o posterior. Activa Corepack si tu entorno no selecciona automáticamente la versión indicada en `packageManager`.
+
 ```bash
 # Instalar dependencias
-npm install
+pnpm install
 
 # Servidor de desarrollo
-npm run dev
+pnpm dev
 
 # Build de producción
-npm run build
+pnpm build
 
 # Preview del build
-npm run preview
+pnpm preview
 ```
 
 ## Estructura del Proyecto

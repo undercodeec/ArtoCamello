@@ -1,6 +1,10 @@
 {
   "name": "artocamello-server",
   "version": "1.0.0",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "description": "Backend API para ArtoCamello",
   "main": "index.ts",
   "scripts": {
@@ -11,7 +15,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:reconcile": "ts-node prisma/reconcile.ts",
-    "test:integration": "npm run build && node --test tests/admin.integration.js"
+    "test:integration": "pnpm run build && node --test tests/admin.integration.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",
