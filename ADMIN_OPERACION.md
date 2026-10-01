@@ -11,7 +11,7 @@
 
 ## Puesta en marcha local
 
-1. Para PostgreSQL local reproducible, ejecuta `docker compose up -d db` en la raíz y copia `server/.env.example` a `server/.env`. Configura `DATABASE_URL` y `JWT_SECRET` según tu entorno. Para crear un dueño inicial, define `ADMIN_SEED_EMAIL` y `ADMIN_SEED_PASSWORD` (mínimo 14 caracteres). Para el dueño global de desarrollo usa `PLATFORM_OWNER_EMAIL` y `PLATFORM_OWNER_PASSWORD` (mínimo 16 caracteres). Usa correos distintos.
+1. Para PostgreSQL local reproducible, ejecuta `docker compose up -d db` en la raíz y copia `server/.env.example` a `server/.env`. Configura `DATABASE_URL`, `JWT_SECRET` y `ADMIN_APP_BASE_URL=http://admin.localhost:5173`. Para crear un dueño inicial, define `ADMIN_SEED_EMAIL` y `ADMIN_SEED_PASSWORD` (mínimo 14 caracteres). Para el dueño global de desarrollo usa `PLATFORM_OWNER_EMAIL` y `PLATFORM_OWNER_PASSWORD` (mínimo 16 caracteres). Usa correos distintos.
 2. En `server/`: `pnpm install`, `pnpm exec prisma migrate deploy`, `pnpm exec prisma generate`, `pnpm prisma:seed`, `pnpm prisma:reconcile`, `pnpm dev`.
 3. En la raíz: `pnpm install` y `pnpm dev`. Para desarrollo local, define `VITE_ADMIN_URL=http://admin.localhost:5173`, entra con el correo sembrado y abre `http://admin.localhost:5173`.
 4. Configura una cuenta bancaria receptora. Solo entonces el profesional verá las instrucciones de transferencia.

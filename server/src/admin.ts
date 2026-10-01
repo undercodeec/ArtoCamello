@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { allocateLead, PaymentConflict, publicBaseUrl, settingsOf } from './payments';
+import { allocateLead, PaymentConflict, settingsOf } from './payments';
 import { createHmac, createHash, timingSafeEqual, randomBytes } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
@@ -16,6 +16,17 @@ type Handler = (req: AdminRequest, res: Response) => Promise<void>;
 const wrap = (fn: Handler) => (req: AdminRequest, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
 const page = (req: Request) => { const p = Number(req.query.page); const s = Number(req.query.pageSize); const current = Number.isInteger(p) ? Math.min(10000, Math.max(1, p)) : 1; const size = Number.isInteger(s) ? Math.min(100, Math.max(1, s)) : 20; return { skip: (current - 1) * size, take: size }; };
 class BadFilter extends Error {}
+
+function adminAppBaseUrl(): string {
+  const configured = process.env.ADMIN_APP_BASE_URL || (process.env.NODE_ENV === 'production' ? '' : 'http://admin.localhost:5173');
+  try {
+    const url = new URL(configured);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+    return url.origin;
+  } catch {
+    throw new Error('ADMIN_APP_BASE_URL debe ser una URL HTTP(S) válida');
+  }
+}
 
 export function adminRouter(db: PrismaClient, secret: string) {
   const router = express.Router();
@@ -269,17 +280,17 @@ export function adminRouter(db: PrismaClient, secret: string) {
     else if (claimHash) await db.user.update({ where: { id: user.id }, data: { verificationToken: claimHash } });
     const membership = await db.tenantMembership.upsert({ where: { tenantId_userId: { tenantId: c.tenantId, userId: user.id } }, update: { roleId, status: 'invited', invitedAt: new Date(), acceptedAt: null }, create: { tenantId: c.tenantId, userId: user.id, roleId, status: 'invited' } });
     await audit(c, req, 'admins.invite', 'TenantMembership', membership.id, undefined, { email, role: role.code });
-    const invitationBase = await publicBaseUrl(db, c.tenantId, req.hostname);
+    const invitationBase = adminAppBaseUrl();
     let delivered = false;
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
         const mail = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-        const url = claimToken ? `${invitationBase}/admin/claim?token=${claimToken}` : `${invitationBase}/admin`;
+        const url = claimToken ? `${invitationBase}/claim?token=${claimToken}` : `${invitationBase}/`;
         await mail.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'Invitación al panel ArtoCamello', text: claimToken ? `Crea tu contraseña y acepta la invitación: ${url}` : `Inicia sesión con tu cuenta verificada y acepta la invitación en ${url}` });
         delivered = true;
       } catch (error) { console.error('Invitation email failed', error); }
     }
-    res.status(201).json({ ...membership, delivered, requiresEmailDelivery: Boolean(claimToken), acceptUrl: claimToken ? undefined : `${invitationBase}/admin` });
+    res.status(201).json({ ...membership, delivered, requiresEmailDelivery: Boolean(claimToken), acceptUrl: claimToken ? undefined : `${invitationBase}/` });
   }));
   router.patch('/memberships/:id', allow('admins.manage'), wrap(async (req, res) => {
     const c = req.admin!; const m = await db.tenantMembership.findFirst({ where: { id: req.params.id, tenantId: c.tenantId }, include: { role: { include: { permissions: { include: { permission: true } } } } } });
