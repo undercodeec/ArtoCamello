@@ -25,6 +25,7 @@ import { AdminPanel } from "./components/admin/AdminPanel";
 import { AdminClaim } from "./components/admin/AdminClaim";
 import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
 import { AdminLogin } from "./components/admin/AdminLogin";
+import { AdminDemo } from "./components/admin/AdminDemo";
 import { isAdminHost } from './adminHost';
 
 const publicRoutes = [
@@ -100,6 +101,7 @@ const publicRoutes = [
 const adminRoutes = [
   { path: '/claim', Component: AdminClaim },
   { path: '/login', Component: AdminLogin },
+  ...(import.meta.env.DEV ? [{ path: '/demo', Component: AdminDemo }] : []),
   { path: '/*', Component: AdminPanel },
 ];
 
