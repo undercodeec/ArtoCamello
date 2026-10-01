@@ -101,7 +101,7 @@ const publicRoutes = [
 const adminRoutes = [
   { path: '/claim', Component: AdminClaim },
   { path: '/login', Component: AdminLogin },
-  ...(import.meta.env.DEV ? [{ path: '/demo', Component: AdminDemo }] : []),
+  { path: '/demo', Component: AdminDemo },
   { path: '/*', Component: AdminPanel },
 ];
 

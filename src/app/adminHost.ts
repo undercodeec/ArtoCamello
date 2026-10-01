@@ -10,5 +10,5 @@ export function publicAppUrl(path = '/') {
 }
 
 export function isAdminHost() {
-  return window.location.hostname === new URL(configuredAdminUrl).hostname;
+  return window.location.hostname === new URL(configuredAdminUrl).hostname || (import.meta.env.DEV && window.location.hostname === 'admin.localhost');
 }
