@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { adminRequest, AdminMe, Payment } from '@/services/adminService';
-import logo from '@/assets/logoartocamello.png';
 import { adminUrl, publicAppUrl } from '@/app/adminHost';
+import { getCurrentUser, logout } from '@/services/authService';
+import { Bell, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, Settings2, ShieldCheck, Users, UserRound, X } from 'lucide-react';
 
 type List<T> = { items: T[]; total: number };
 const money = (amount: string | number, currency = 'USD') => `${Number(amount).toFixed(2)} ${currency}`;
@@ -19,6 +20,11 @@ const nav = [
   ['/settings', 'Configuración', 'settings.read'],
   ['/audit', 'Auditoría', 'audit.read'],
 ];
+const navIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  '/': LayoutDashboard, '/payments/transfers': CreditCard, '/payments': ClipboardList,
+  '/users/clients': Users, '/users/professionals': UserRound, '/access/admins': ShieldCheck,
+  '/access/roles': ShieldCheck, '/settings': Settings2, '/audit': ClipboardList,
+};
 const input = 'border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm';
 const button = 'bg-[#101828] text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50';
 
@@ -38,6 +44,7 @@ export function AdminPanel() {
   const [error, setError] = useState('');
   const [emailCode, setEmailCode] = useState(false);
   const [mfa, setMfa] = useState<'setup' | 'verify' | null>(null);
+  const [mobileMenu, setMobileMenu] = useState(false);
   const loadAccess = () => adminRequest<AdminMe>('/me').then(value => { setMe(value); setError(''); setEmailCode(false); setMfa(null); }).catch((e: Error & { code?: string }) => { if (e.code === 'EMAIL_CODE_REQUIRED') setEmailCode(true); else if (e.code === 'MFA_SETUP_REQUIRED') setMfa('setup'); else if (e.code === 'MFA_REQUIRED') setMfa('verify'); else setError(e.message); });
   useEffect(() => { loadAccess(); }, []);
   useEffect(() => { const listener = (event: Event) => setMfa((event as CustomEvent<string>).detail === 'MFA_SETUP_REQUIRED' ? 'setup' : 'verify'); window.addEventListener('admin-mfa-required', listener); return () => window.removeEventListener('admin-mfa-required', listener); }, []);
@@ -49,14 +56,21 @@ export function AdminPanel() {
   const permissions = new Set(me.permissions);
   const selected = nav.find(([path]) => path === sub);
   if (selected && !permissions.has(selected[2])) return <main className="p-8">Permiso insuficiente</main>;
-  return <div className="min-h-screen bg-[#f6f7f9] text-[#101828] lg:flex">
-    <aside className="lg:w-64 bg-white border-r border-gray-200 p-5 lg:min-h-screen">
-      <a href={publicAppUrl()}><img src={logo} alt="ArtoCamello" className="w-40 mb-5" /></a>
+  const userName = getCurrentUser()?.fullName || 'Administrador';
+  const initials = userName.charAt(0).toUpperCase();
+  const signOut = () => { logout(); window.location.assign(publicAppUrl()); };
+  return <div className="min-h-screen bg-[#f6f7f9] text-[#101828]">
+    <div className="lg:hidden fixed inset-x-0 top-0 h-16 bg-[#101828] text-white z-30 flex items-center justify-between px-4 shadow-lg"><span className="font-bold text-lg">ArtoCamello <span className="text-[#FFCA0C]">Admin</span></span><button aria-label="Abrir navegación" onClick={() => setMobileMenu(!mobileMenu)}>{mobileMenu ? <X /> : <Menu />}</button></div>
+    <aside className={`fixed inset-y-0 left-0 w-72 bg-[#101828] text-white flex flex-col z-40 transition-transform duration-300 ${mobileMenu ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+      <div className="p-6 border-b border-white/10"><a href={publicAppUrl()} className="flex items-center gap-3"><span className="w-10 h-10 rounded-xl bg-[#FFCA0C] text-[#101828] grid place-items-center font-black text-xl">A</span><span className="font-bold text-xl tracking-tight">ArtoCamello <span className="text-[#FFCA0C] font-medium">Admin</span></span></a></div>
       <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">Panel administrativo · {me.role.replace(/_/g, ' ')}</p>
-      <nav className="grid grid-cols-2 lg:grid-cols-1 gap-1">{nav.filter(([, , permission]) => permissions.has(permission)).map(([path, label]) =>
-        <Link key={path} to={path} className={`px-3 py-2 rounded-lg text-sm ${sub === path ? 'bg-[#FFCA0C] font-bold' : 'hover:bg-gray-100'}`}>{label}</Link>)}</nav>
+      <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">{nav.filter(([, , permission]) => permissions.has(permission)).map(([path, label]) => { const Icon = navIcons[path]; return <Link key={path} to={path} onClick={() => setMobileMenu(false)} className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${sub === path ? 'bg-[#FFCA0C] text-[#101828] shadow-lg shadow-black/20' : 'text-gray-300 hover:text-white hover:bg-white/10'}`}><Icon className="w-5 h-5 shrink-0" />{label}</Link>; })}</nav>
+      <div className="p-4 border-t border-white/10"><div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/10 mb-3"><div className="w-10 h-10 rounded-full bg-[#FFCA0C] text-[#101828] grid place-items-center font-bold">{initials}</div><div className="min-w-0"><p className="text-sm font-semibold truncate">{userName}</p><p className="text-xs text-gray-400 capitalize">{me.role.replace(/_/g, ' ')}</p></div></div><button onClick={signOut} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-300 hover:bg-red-500/15 transition-colors"><LogOut className="w-5 h-5" />Cerrar sesión</button></div>
     </aside>
-    <main className="flex-1 p-4 md:p-8 max-w-[1500px] min-w-0">
+    {mobileMenu && <button aria-label="Cerrar navegación" className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setMobileMenu(false)} />}
+    <main className="min-w-0 lg:ml-72 pt-16 lg:pt-0">
+      <header className="hidden lg:flex h-20 px-8 border-b border-gray-200 bg-white/85 backdrop-blur items-center justify-between sticky top-0 z-20"><div><p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Panel administrativo</p><p className="font-semibold">{selected?.[1] || 'Panel'}</p></div><div className="flex items-center gap-4"><button aria-label="Notificaciones" className="w-10 h-10 rounded-xl grid place-items-center text-gray-500 hover:bg-gray-100"><Bell className="w-5 h-5" /></button><div className="h-8 border-l border-gray-200" /><div className="flex items-center gap-2"><div className="w-9 h-9 rounded-full bg-[#FFCA0C] grid place-items-center font-bold text-sm">{initials}</div><span className="text-sm font-semibold max-w-40 truncate">{userName}</span></div></div></header>
+      <div className="p-4 md:p-8 max-w-[1500px] min-w-0 mx-auto">
       {sub === '/' && <Dashboard />}
       {sub === '/payments/transfers' && <Payments transfers permissions={permissions} />}
       {sub === '/payments' && <Payments permissions={permissions} />}
@@ -67,6 +81,7 @@ export function AdminPanel() {
       {sub === '/settings' && <Settings permissions={permissions} />}
       {sub === '/audit' && <Audit />}
       {!selected && <div><h1 className="text-2xl font-bold">Página no encontrada</h1><button onClick={() => navigate('/')} className={button}>Ir al inicio</button></div>}
+      </div>
     </main>
   </div>;
 }
