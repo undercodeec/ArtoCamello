@@ -16,7 +16,7 @@ async function main() {
     id: 'artocamello', slug: 'artocamello', name: 'ArtoCamello',
     settings: { maxProfessionalsPerLead: 4, leadFeeRate: 0.06, leadMinCostUSD: 3, currency: 'USD', transferExpiryHours: 72, bankAccounts: [] },
   }});
-  for (const hostname of ['artocamello.com', 'www.artocamello.com', 'api.artocamello.com']) {
+  for (const hostname of ['artocamello.com', 'www.artocamello.com', 'api.artocamello.com', 'admin.artocamello.com']) {
     await db.tenantDomain.upsert({ where: { hostname }, update: {}, create: { tenantId: 'artocamello', hostname, isPrimary: hostname === 'artocamello.com' } });
   }
   const allCodes = [...new Set(Object.values(rolePermissions).flat())];

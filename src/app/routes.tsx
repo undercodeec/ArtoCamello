@@ -24,8 +24,10 @@ import { ProProfileSettings } from "./components/dashboard/ProProfileSettings";
 import { AdminPanel } from "./components/admin/AdminPanel";
 import { AdminClaim } from "./components/admin/AdminClaim";
 import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
+import { AdminLogin } from "./components/admin/AdminLogin";
+import { isAdminHost } from './adminHost';
 
-export const router = createBrowserRouter([
+const publicRoutes = [
   {
     element: (
       <>
@@ -91,8 +93,14 @@ export const router = createBrowserRouter([
           { path: "transfer/:requestId", Component: TransferPaymentPage },
         ]
       },
-      { path: "/admin/claim", Component: AdminClaim },
-      { path: "/admin/*", Component: AdminPanel }
     ]
   }
-]);
+];
+
+const adminRoutes = [
+  { path: '/claim', Component: AdminClaim },
+  { path: '/login', Component: AdminLogin },
+  { path: '/*', Component: AdminPanel },
+];
+
+export const router = createBrowserRouter(isAdminHost() ? adminRoutes : publicRoutes);

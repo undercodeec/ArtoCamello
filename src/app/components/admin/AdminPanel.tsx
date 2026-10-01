@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { adminRequest, AdminMe, Payment } from '@/services/adminService';
 import logo from '@/assets/logoartocamello.png';
+import { adminUrl, publicAppUrl } from '@/app/adminHost';
 
 type List<T> = { items: T[]; total: number };
 const money = (amount: string | number, currency = 'USD') => `${Number(amount).toFixed(2)} ${currency}`;
@@ -40,18 +41,18 @@ export function AdminPanel() {
   useEffect(() => { loadAccess(); }, []);
   useEffect(() => { const listener = (event: Event) => setMfa((event as CustomEvent<string>).detail === 'MFA_SETUP_REQUIRED' ? 'setup' : 'verify'); window.addEventListener('admin-mfa-required', listener); return () => window.removeEventListener('admin-mfa-required', listener); }, []);
   if (mfa) return <MfaGate mode={mfa} onReady={loadAccess} />;
-  if (error) return <main className="min-h-screen grid place-items-center p-8"><div className="bg-white p-8 rounded-xl shadow max-w-md"><h1 className="text-xl font-bold mb-2">Acceso administrativo</h1><p>{error}</p><button className={`${button} mt-4`} onClick={() => adminRequest('/invitations/accept', { method: 'POST' }).then(() => adminRequest<AdminMe>('/me')).then(value => { setMe(value); setError(''); }).catch(e => setError(e.message))}>Aceptar invitación pendiente</button><Link to="/" className="underline mt-4 block">Volver al inicio</Link></div></main>;
+  if (error) return <main className="min-h-screen grid place-items-center p-8"><div className="bg-white p-8 rounded-xl shadow max-w-md"><h1 className="text-xl font-bold mb-2">Acceso administrativo</h1><p>{error}</p><button className={`${button} mt-4`} onClick={() => adminRequest('/invitations/accept', { method: 'POST' }).then(() => adminRequest<AdminMe>('/me')).then(value => { setMe(value); setError(''); }).catch(e => setError(e.message))}>Aceptar invitación pendiente</button><Link to="/login" className="underline mt-4 block">Iniciar sesión con otra cuenta</Link></div></main>;
   if (!me) return <main className="p-8">Verificando acceso...</main>;
-  const sub = pathname.slice('/admin'.length) || '/';
+  const sub = pathname || '/';
   const permissions = new Set(me.permissions);
   const selected = nav.find(([path]) => path === sub);
   if (selected && !permissions.has(selected[2])) return <main className="p-8">Permiso insuficiente</main>;
   return <div className="min-h-screen bg-[#f6f7f9] text-[#101828] lg:flex">
     <aside className="lg:w-64 bg-white border-r border-gray-200 p-5 lg:min-h-screen">
-      <Link to="/"><img src={logo} alt="ArtoCamello" className="w-40 mb-5" /></Link>
+      <a href={publicAppUrl()}><img src={logo} alt="ArtoCamello" className="w-40 mb-5" /></a>
       <p className="text-xs uppercase tracking-wide text-gray-500 mb-3">Panel administrativo · {me.role.replace(/_/g, ' ')}</p>
       <nav className="grid grid-cols-2 lg:grid-cols-1 gap-1">{nav.filter(([, , permission]) => permissions.has(permission)).map(([path, label]) =>
-        <Link key={path} to={`/admin${path === '/' ? '' : path}`} className={`px-3 py-2 rounded-lg text-sm ${sub === path ? 'bg-[#FFCA0C] font-bold' : 'hover:bg-gray-100'}`}>{label}</Link>)}</nav>
+        <Link key={path} to={path} className={`px-3 py-2 rounded-lg text-sm ${sub === path ? 'bg-[#FFCA0C] font-bold' : 'hover:bg-gray-100'}`}>{label}</Link>)}</nav>
     </aside>
     <main className="flex-1 p-4 md:p-8 max-w-[1500px] min-w-0">
       {sub === '/' && <Dashboard />}
@@ -63,7 +64,7 @@ export function AdminPanel() {
       {sub === '/access/roles' && <Roles permissions={permissions} />}
       {sub === '/settings' && <Settings permissions={permissions} />}
       {sub === '/audit' && <Audit />}
-      {!selected && <div><h1 className="text-2xl font-bold">Página no encontrada</h1><button onClick={() => navigate('/admin')} className={button}>Ir al inicio</button></div>}
+      {!selected && <div><h1 className="text-2xl font-bold">Página no encontrada</h1><button onClick={() => navigate('/')} className={button}>Ir al inicio</button></div>}
     </main>
   </div>;
 }
@@ -93,7 +94,7 @@ function MfaGate({ mode, onReady }: { mode: 'setup' | 'verify'; onReady: () => v
     {mode === 'setup' && !recoveryCodes.length && <><p>Configura un autenticador TOTP para esta cuenta.</p>{!secret ? <button className={button} disabled={busy} onClick={setup}>Generar clave de configuración</button> : <><p>Ingresa esta clave en tu aplicación autenticadora:</p><code className="block break-all bg-gray-100 p-3 rounded select-all">{secret}</code></>}</>}
     {recoveryCodes.length > 0 && <><p className="font-semibold">Guarda estos códigos de recuperación en un lugar seguro. Cada uno sirve una sola vez y no se mostrará de nuevo.</p><pre className="bg-gray-100 p-3 rounded whitespace-pre-wrap select-all">{recoveryCodes.join('\n')}</pre><button className={button} onClick={() => { setRecoveryCodes([]); setSecret(''); onReady(); }}>Ya guardé los códigos</button></>}
     {(mode === 'verify' || Boolean(secret)) && !recoveryCodes.length && <><label className="block text-sm">{mode === 'verify' ? 'Código del autenticador o de recuperación' : 'Código de seis dígitos'}<input className={`${input} block w-full mt-1`} autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value)} /></label><button className={button} disabled={busy || !code} onClick={submit}>{mode === 'verify' ? 'Entrar al panel' : 'Activar MFA'}</button></>}
-    {error && <p className="text-red-700">{error}</p>}<Link to="/" className="block underline">Volver al inicio</Link>
+    {error && <p className="text-red-700">{error}</p>}
   </div></main>;
 }
 
@@ -181,7 +182,7 @@ function Admins({ permissions }: { permissions: Set<string> }) {
   const { data, error, loading, reload } = useData<Array<{ id: string; status: string; user: { email: string; fullName: string }; role: { id: string; code: string } }>>('/memberships');
   const roles = useData<Array<{ id: string; code: string; name: string }>>('/roles');
   const [email, setEmail] = useState(''); const [roleId, setRoleId] = useState(''); const [message, setMessage] = useState('');
-  const invite = async () => { try { const result = await adminRequest<{ delivered: boolean; requiresEmailDelivery: boolean; acceptUrl?: string }>('/invitations', { method: 'POST', body: JSON.stringify({ email, roleId }) }); setMessage(result.delivered ? 'Invitación enviada por correo.' : result.requiresEmailDelivery ? 'No se pudo enviar el correo. Reintenta la invitación.' : `Invitación creada. Comparte ${result.acceptUrl || '/admin'} con el usuario.`); reload(); } catch (e) { setMessage((e as Error).message); } };
+  const invite = async () => { try { const result = await adminRequest<{ delivered: boolean; requiresEmailDelivery: boolean; acceptUrl?: string }>('/invitations', { method: 'POST', body: JSON.stringify({ email, roleId }) }); setMessage(result.delivered ? 'Invitación enviada por correo.' : result.requiresEmailDelivery ? 'No se pudo enviar el correo. Reintenta la invitación.' : `Invitación creada. Comparte ${result.acceptUrl || adminUrl()} con el usuario.`); reload(); } catch (e) { setMessage((e as Error).message); } };
   const change = async (id: string, patch: object) => { try { await adminRequest(`/memberships/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }); reload(); } catch (e) { alert((e as Error).message); } };
   return <section><h1 className="text-3xl font-bold mb-5">Administradores</h1>{error && <p className="text-red-600">{error}</p>}{permissions.has('admins.invite') && <div className="bg-white border rounded-xl p-4 flex flex-wrap gap-2 mb-5"><input className={input} type="email" placeholder="Correo verificado del tenant" value={email} onChange={e => setEmail(e.target.value)} /><select className={input} value={roleId} onChange={e => setRoleId(e.target.value)}><option value="">Selecciona un rol</option>{roles.data?.filter(r => r.code !== 'tenant_owner').map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select><button className={button} onClick={invite}>Invitar</button>{message && <p className="w-full text-sm">{message}</p>}</div>}{loading ? 'Cargando...' : <div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead><tbody>{data?.map(m => <tr key={m.id} className="border-t"><td className="p-3">{m.user.fullName}</td><td>{m.user.email}</td><td>{permissions.has('admins.manage') && m.role.code !== 'tenant_owner' ? <select className={input} value={m.role.id} onChange={e => change(m.id, { roleId: e.target.value })}>{roles.data?.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select> : m.role.code}</td><td>{m.status}</td><td>{permissions.has('admins.manage') && m.role.code !== 'tenant_owner' && <button className="underline" onClick={() => change(m.id, { status: m.status === 'active' ? 'revoked' : 'active' })}>{m.status === 'active' ? 'Revocar' : 'Activar'}</button>}</td></tr>)}</tbody></table></div>}</section>;
 }

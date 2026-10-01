@@ -6,6 +6,7 @@ import { POPULAR_SERVICES } from '../constants/services';
 import logoArtocamello from '@/assets/logoartocamello.png';
 import { adminRequest, AdminMe } from '@/services/adminService';
 import { logout as logoutService } from '@/services/authService';
+import { adminUrl } from '@/app/adminHost';
 
 export function Header() {
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState(false);
@@ -93,7 +94,7 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
-            {hasAdmin && <Link to="/admin" className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Administración</Link>}
+            {hasAdmin && <a href={adminUrl()} className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Administración</a>}
 
             {isAuthenticated && userType !== 'pro' && (
               <>
@@ -185,7 +186,7 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
-            {hasAdmin && <Link to="/admin" onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Administración</Link>}
+            {hasAdmin && <a href={adminUrl()} onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Administración</a>}
 
             {isAuthenticated && userType !== 'pro' && (
               <>

@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -34,6 +34,9 @@ const PAYPHONE_TOKEN = process.env.PAYPHONE_TOKEN || '';
 const PAYPHONE_STORE_ID = process.env.PAYPHONE_STORE_ID || '';
 const PAYPHONE_BASE_URL = process.env.PAYPHONE_BASE_URL || 'https://pay.payphonetodoesposible.com';
 const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
+const adminHostnames = new Set((process.env.ADMIN_HOSTNAMES || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
+if (process.env.NODE_ENV === 'production' && !adminHostnames.size) throw new Error('ADMIN_HOSTNAMES es obligatorio en producción');
+const isAdminHost = (hostname: string) => !adminHostnames.size || adminHostnames.has(hostname.toLowerCase());
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
@@ -42,7 +45,7 @@ app.use(cors({
     if (!origin) { callback(null, true); return; }
     try {
       const url = new URL(origin);
-      if (url.protocol === 'http:' && url.hostname === 'localhost' && url.port === '5173') { callback(null, true); return; }
+      if (url.protocol === 'http:' && ['localhost', 'admin.localhost'].includes(url.hostname) && url.port === '5173') { callback(null, true); return; }
       if (url.protocol !== 'https:') { callback(null, false); return; }
       prisma.tenantDomain.findUnique({ where: { hostname: url.hostname.toLowerCase() } }).then(domain => callback(null, Boolean(domain))).catch(callback);
     } catch { callback(null, false); }
@@ -1558,8 +1561,12 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
 });
 
 // Iniciar servidor
-app.use('/api/admin/mfa', adminMfaRouter(prisma, JWT_SECRET));
-app.use('/api/admin', adminRouter(prisma, JWT_SECRET));
+const adminHostGuard = (req: Request, res: Response, next: NextFunction) => {
+  if (!isAdminHost(req.hostname)) { res.status(404).end(); return; }
+  next();
+};
+app.use('/api/admin/mfa', adminHostGuard, adminMfaRouter(prisma, JWT_SECRET));
+app.use('/api/admin', adminHostGuard, adminRouter(prisma, JWT_SECRET));
 app.use('/api/platform', platformRouter(prisma, JWT_SECRET));
 app.use('/api/payments', transferRouter(prisma, JWT_SECRET));
 export { app, prisma };

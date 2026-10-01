@@ -137,19 +137,19 @@ Reglas obligatorias:
 
 ## 7. Experiencia del panel
 
-Ruta base: `/admin`. Se protegerá tanto en React como en el backend; el guard del frontend mejora la experiencia, pero no concede acceso.
+Host base: `https://admin.artocamello.com`. Se protegerá tanto en React como en el backend; el guard del frontend mejora la experiencia, pero no concede acceso. El sitio público no servirá rutas administrativas.
 
 | Módulo | Ruta sugerida | Contenido y acciones |
 | --- | --- | --- |
-| Inicio | `/admin` | Indicadores de transferencias pendientes, pagos aprobados, usuarios nuevos, profesionales por verificar y actividad reciente. |
-| Transferencias | `/admin/payments/transfers` | Tabla paginada, filtros por estado, fecha, monto, banco y referencia; detalle, comprobante privado, aprobar, rechazar y exportar. |
-| Todos los pagos | `/admin/payments` | Historial unificado de PayPhone existente, transferencia y futura tarjeta; filtros, detalle de eventos y asignaciones. |
-| Clientes | `/admin/users/clients` | Búsqueda, estado, solicitudes, perfil y suspensión o reactivación con motivo. |
-| Profesionales | `/admin/users/professionals` | Perfil, documentos, verificación, leads adquiridos, pagos y suspensión o reactivación. |
-| Administradores | `/admin/access/admins` | Lista de membresías, invitaciones, cambio de rol, revocación y estado. |
-| Roles y permisos | `/admin/access/roles` | Roles del tenant, matriz de permisos y roles del sistema de solo lectura. |
-| Configuración | `/admin/settings` | Datos del tenant, cuentas bancarias receptoras, límite de compradores por lead, comisión y configuración de proveedor. |
-| Auditoría | `/admin/audit` | Filtros por actor, recurso, acción y fecha; detalle de cambios sin exponer secretos. |
+| Inicio | `https://admin.artocamello.com/` | Indicadores de transferencias pendientes, pagos aprobados, usuarios nuevos, profesionales por verificar y actividad reciente. |
+| Transferencias | `https://admin.artocamello.com/payments/transfers` | Tabla paginada, filtros por estado, fecha, monto, banco y referencia; detalle, comprobante privado, aprobar, rechazar y exportar. |
+| Todos los pagos | `https://admin.artocamello.com/payments` | Historial unificado de PayPhone existente, transferencia y futura tarjeta; filtros, detalle de eventos y asignaciones. |
+| Clientes | `https://admin.artocamello.com/users/clients` | Búsqueda, estado, solicitudes, perfil y suspensión o reactivación con motivo. |
+| Profesionales | `https://admin.artocamello.com/users/professionals` | Perfil, documentos, verificación, leads adquiridos, pagos y suspensión o reactivación. |
+| Administradores | `https://admin.artocamello.com/access/admins` | Lista de membresías, invitaciones, cambio de rol, revocación y estado. |
+| Roles y permisos | `https://admin.artocamello.com/access/roles` | Roles del tenant, matriz de permisos y roles del sistema de solo lectura. |
+| Configuración | `https://admin.artocamello.com/settings` | Datos del tenant, cuentas bancarias receptoras, límite de compradores por lead, comisión y configuración de proveedor. |
+| Auditoría | `https://admin.artocamello.com/audit` | Filtros por actor, recurso, acción y fecha; detalle de cambios sin exponer secretos. |
 
 La bandeja de transferencias mostrará como mínimo: identificador, profesional pagador, lead, monto y moneda, referencia declarada, banco, fecha de transferencia, fecha de envío, estado, revisor y enlace temporal al comprobante. Antes de aprobar, mostrará la cuenta de destino configurada y advertirá duplicados de referencia, monto, pagador o comprobante.
 
@@ -221,7 +221,7 @@ Requisitos antes de activar tarjeta:
 2. Crear el tenant inicial ArtoCamello, migrar usuarios y datos existentes a él, y añadir `tenantId` a entidades de negocio.
 3. Crear migración con índices compuestos que incluyan `tenantId` para listados frecuentes y restricciones únicas por tenant.
 4. Extender JWT y middleware para construir `TenantContext`, resolver membresía activa y validar permisos en el servidor.
-5. Añadir `AdminRouteGuard`, layout `/admin` y navegación condicionada por permisos.
+5. Añadir guard del host administrativo, layout y navegación condicionada por permisos.
 6. Registrar en `AuditLog` cambios de membresías, roles, usuarios, pagos y configuración.
 
 **Criterio de salida:** ningún usuario de un tenant puede leer o mutar recursos de otro tenant, y el acceso administrativo se comprueba con pruebas de integración de autorización.
@@ -314,11 +314,11 @@ Métricas de aceptación para producción:
 2. Middleware de contexto de tenant y autorización por permiso, acompañado de pruebas de integración.
 3. Servicio de pagos genérico, adaptador de transferencia y adaptación de PayPhone.
 4. Flujo profesional para transferencia y carga segura de comprobantes.
-5. Panel `/admin` con módulos de transferencias, pagos, usuarios, acceso, configuración y auditoría.
+5. Panel en el subdominio administrativo con módulos de transferencias, pagos, usuarios, acceso, configuración y auditoría.
 6. Documento de operación para conciliadores: criterios de aprobación/rechazo, manejo de duplicados, incidentes y tiempos de respuesta.
 7. Especificación y configuración del adaptador de tarjeta, lista para conectar al proveedor seleccionado.
 
-## 15. Estado de ejecución local (30 de septiembre de 2026)
+## 15. Estado de ejecución local (1 de octubre de 2026)
 
 Las migraciones, el API administrativo, el flujo de transferencias, el panel y la integración de tarjeta desactivada por defecto están implementados en el árbol de trabajo actual. El formulario de comprobante ya registra el monto declarado; la vista de revisión lo muestra y el API bloquea la aprobación si difiere del monto esperado. Los comprobantes anteriores conservan el monto declarado vacío y requieren cotejo manual.
 
@@ -327,4 +327,6 @@ La creación de solicitudes está limitada en el API a usuarios con rol `client`
 
 En la base local se aplicaron las ocho migraciones disponibles. La compilación de servidor y frontend, la comprobación de tipos del frontend y las tres pruebas automatizadas pasaron. La conciliación local reportó cero compras pagadas y cero pagos asignados, sin diferencias; esto no valida una migración con historial real.
 
-Para habilitar producción siguen pendientes las tareas con datos, infraestructura y credenciales reales de [la lista de validación](server/docs/PRODUCTION_CHECKLIST.md): migración ensayada sobre copia de producción, cuentas bancarias y secretos, pruebas UAT de proveedores, carga representativa y alertas operativas. Tarjeta debe permanecer deshabilitada hasta completar esas verificaciones.
+El panel se sirve exclusivamente desde `https://admin.artocamello.com`; el sitio público no contiene rutas `/admin`. El API exige que las solicitudes administrativas lleguen desde los hosts configurados en `ADMIN_HOSTNAMES` en producción. La migración incorpora `admin.artocamello.com` como dominio del tenant inicial.
+
+Para habilitar producción siguen pendientes las tareas con datos, infraestructura y credenciales reales de [la lista de validación](server/docs/PRODUCTION_CHECKLIST.md): migración ensayada sobre copia de producción, DNS y TLS del subdominio administrativo, cuentas bancarias y secretos, pruebas UAT de proveedores, carga representativa y alertas operativas. Tarjeta debe permanecer deshabilitada hasta completar esas verificaciones.

@@ -7,6 +7,7 @@ import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
 import { useGoogleLogin } from '@react-oauth/google';
 import { adminRequest } from '@/services/adminService';
+import { adminUrl } from '@/app/adminHost';
 
 const GoogleIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -82,7 +83,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         onClose();
         const isAdmin = await adminRequest('/me').then(() => true).catch(() => false);
         const pendingAdmin = !isAdmin && await adminRequest<{ pending: boolean }>('/invitations/pending').then(value => value.pending).catch(() => false);
-        if (isAdmin || pendingAdmin) navigate('/admin');
+        if (isAdmin || pendingAdmin) window.location.assign(adminUrl());
         else if (user.role === UserRole.PROFESSIONAL) {
           navigate('/dashboard');
         } else {
@@ -135,7 +136,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         onClose();
         const isAdmin = await adminRequest('/me').then(() => true).catch(() => false);
         const pendingAdmin = !isAdmin && await adminRequest<{ pending: boolean }>('/invitations/pending').then(value => value.pending).catch(() => false);
-        if (isAdmin || pendingAdmin) navigate('/admin');
+        if (isAdmin || pendingAdmin) window.location.assign(adminUrl());
         else if (user.role === UserRole.PROFESSIONAL) {
           navigate('/dashboard');
         } else {
