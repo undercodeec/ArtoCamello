@@ -88,6 +88,9 @@ ever being served directly by Nginx.
 - All values that vary by environment go in `deploy/.env.example` with blank
   placeholders and in an untracked VPS `.env` file. No real secret is added to
   source control.
+- The VPS runbook configures SMTP through `mail.koorvex.com` on port `465`
+  using `soporte@koorvex.com` and implicit TLS. `SMTP_PASS` remains blank in
+  the committed template and must be entered manually in the VPS `.env`.
 - The server runs as a non-root application user; Nginx handles privileged
   ports. The runbook specifies UFW rules allowing only SSH, HTTP and HTTPS.
 
@@ -114,5 +117,6 @@ embedded in the files.
 The VPS runbook defines live smoke checks: HTTPS redirect, certificate,
 security headers, SPA route fallback, `/api/health`, admin host guard, database
 migration state, successful MFA/email-code flow, backup restore rehearsal and
-log review. Payment-provider and bank-account checks remain explicit manual
-gates.
+log review. It also includes an SMTP delivery check using the Koorvex mail
+server without printing credentials. Payment-provider and bank-account checks
+remain explicit manual gates.
