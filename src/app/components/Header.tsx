@@ -95,6 +95,7 @@ export function Header() {
             </Link>
 
             {hasAdmin && <a href={adminUrl()} className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Administración</a>}
+            {import.meta.env.DEV && <a href={adminUrl('/demo')} className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Ver panel admin</a>}
 
             {isAuthenticated && userType !== 'pro' && (
               <>
@@ -187,6 +188,7 @@ export function Header() {
             </Link>
 
             {hasAdmin && <a href={adminUrl()} onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Administración</a>}
+            {import.meta.env.DEV && <a href={adminUrl('/demo')} onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Ver panel admin</a>}
 
             {isAuthenticated && userType !== 'pro' && (
               <>

@@ -1,6 +1,8 @@
 # ArtoCamello — Marketplace de Servicios Profesionales
 
-Marketplace que conecta clientes con profesionales locales a través de un sistema de solicitudes, compra de contacto con créditos, presupuestos y reseñas.
+Marketplace que conecta clientes con profesionales locales mediante solicitudes, compra directa de contactos en USD, cotizaciones y reseñas. En el primer MVP solo el profesional paga a ArtoCamello por desbloquear un contacto; el cliente y el administrador no compran contactos.
+
+El funcionamiento comercial previsto, lo que ya existe en el código y las tareas pendientes están en [Estado actual y primer MVP](docs/ESTADO_ACTUAL_Y_MVP.md).
 
 ## Stack Tecnológico
 
@@ -46,7 +48,7 @@ src/
 │   ├── requestService.ts      # CRUD de solicitudes
 │   ├── leadService.ts         # Compra de contacto / desbloqueo de lead
 │   ├── quoteService.ts        # Presupuestos
-│   ├── walletService.ts       # Billetera y recargas
+│   ├── walletService.ts       # Archivo heredado; no hay recargas activas
 │   ├── reviewService.ts       # Reseñas
 │   └── categoryService.ts     # Categorías de servicio
 │
@@ -97,9 +99,8 @@ src/
 | **LeadPurchase** | Registro de compra de contacto |
 | **Quote** | Presupuesto enviado por profesional |
 | **Review** | Reseña del cliente al profesional |
-| **Wallet** | Saldo de créditos del profesional |
-| **WalletTransaction** | Historial de recargas y gastos |
-| **CreditPackage** | Paquetes de recarga disponibles |
+| **Payment** | Cobro por desbloqueo de contacto realizado por un profesional |
+| **TransferSubmission** | Comprobante y datos declarados de una transferencia |
 | **Notification** | Notificaciones del sistema |
 
 ### Estados de solicitud:
@@ -120,7 +121,7 @@ src/
 | `/dashboard` | Profesional | Resumen del negocio |
 | `/dashboard/jobs` | Profesional | Explorar y desbloquear trabajos |
 | `/dashboard/contacts` | Profesional | Contactos comprados |
-| `/dashboard/wallet` | Profesional | Billetera y facturación |
+| `/dashboard/wallet` | Profesional | Historial de pagos por contactos |
 | `/dashboard/profile` | Profesional | Perfil público editable |
 
 ## Credenciales Demo

@@ -133,6 +133,13 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal(reviewedDetail.profile.reviewCount, 1);
     assert.equal(reviewedDetail.profile.rating, 5);
     const request = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Test', description: 'Test', location: 'Test', contactPhone: '000', contactEmail: 'private@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    assert.equal((await call('/api/payments/transfer-intents', ids.client, 'POST', { requestId: request.id })).status, 403);
+    assert.equal((await call('/api/payments/card-intents', ids.client, 'POST', { requestId: request.id })).status, 403);
+    assert.equal((await call('/api/payments/methods', ids.client)).status, 403);
+    assert.equal((await call('/api/leads/pay', ids.client, 'POST', { requestId: request.id })).status, 403);
+    assert.equal((await call('/api/payments/transfer-intents', ids.a, 'POST', { requestId: request.id })).status, 403);
+    assert.equal((await call('/api/leads/pay', ids.a, 'POST', { requestId: request.id })).status, 403);
+    assert.equal((await call('/api/payments/history', ids.a)).status, 403);
     const purchase = await db.leadPurchase.create({ data: { tenantId: tenantA, requestId: request.id, professionalId: proA.id, costUSD: 6 } });
     const purchase2 = await db.leadPurchase.create({ data: { tenantId: tenantA, requestId: request.id, professionalId: pro2.id, costUSD: 6 } });
     const payment = await db.payment.create({ data: { tenantId: tenantA, payerUserId: ids.a, amount: 6, method: 'transfer', status: 'under_review', reference: `test-a-${suffix}`, metadata: { leadPurchaseId: purchase.id } } });
@@ -151,7 +158,13 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await call('/api/admin/payments', ids.a, 'GET', undefined, hostB)).status, 403);
     assert.equal((await call('/api/requests/available', ids.pro3, 'GET', undefined, hostB)).status, 403);
     assert.equal((await call(`/api/admin/payments/${payment.id}`, ids.b)).status, 404);
-    assert.equal((await call(`/api/payments/${payment.id}`, ids.b)).status, 404);
+    assert.equal((await call(`/api/payments/${payment.id}`, ids.b)).status, 403);
+    const clientDetail = await (await call(`/api/admin/users/${ids.client}`, ids.a)).json();
+    assert.deepEqual(clientDetail.payments, []);
+    assert.deepEqual(clientDetail.purchases, []);
+    const adminDetail = await (await call(`/api/admin/users/${ids.a}`, ids.a)).json();
+    assert.equal(adminDetail.isAdmin, true);
+    assert.deepEqual(adminDetail.payments, []);
     assert.equal((await call(`/api/admin/payments/transfers/${payment.id}/approve`, ids.b, 'POST', {})).status, 403);
     const ownMembership = await db.tenantMembership.findUniqueOrThrow({ where: { tenantId_userId: { tenantId: tenantA, userId: ids.a } } });
     assert.equal((await call(`/api/admin/memberships/${ownMembership.id}`, ids.a, 'PATCH', { status: 'revoked' })).status, 403);

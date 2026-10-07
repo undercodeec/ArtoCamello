@@ -181,12 +181,14 @@ export function adminRouter(db: PrismaClient, secret: string) {
   }));
   router.get('/payments/:id', allow('payments.read'), wrap(async (req, res) => {
     const item = await db.payment.findFirst({ where: { id: req.params.id, tenantId: req.admin!.tenantId }, include: {
-      payer: { select: { id: true, fullName: true, email: true } }, allocations: true, events: { orderBy: { createdAt: 'desc' } }, transfers: { include: { proofFile: { select: { id: true, checksum: true } }, reviewer: { select: { fullName: true } } }, orderBy: { createdAt: 'desc' } },
+      payer: { select: { id: true, fullName: true, email: true } }, allocations: true, events: { orderBy: { createdAt: 'desc' } }, transfers: { include: { proofFile: { select: { id: true, checksum: true, mimeType: true } }, reviewer: { select: { fullName: true } } }, orderBy: { createdAt: 'desc' } },
     }});
     if (!item) { res.status(404).json({ error: 'Pago no encontrado' }); return; }
-    const transfers = item.transfers.map(t => ({ ...t, proofUrl: `/api/admin/files/${t.proofFileId}?token=${signProof(t.proofFileId, req.admin!.tenantId, secret)}` }));
+    const transfers = item.transfers.map(t => ({ ...t, proofMimeType: t.proofFile.mimeType, proofUrl: `/api/admin/files/${t.proofFileId}?token=${signProof(t.proofFileId, req.admin!.tenantId, secret)}` }));
     const duplicates = await db.transferSubmission.count({ where: { payment: { tenantId: req.admin!.tenantId, id: { not: item.id } }, OR: [...transfers.flatMap(t => [{ transferReference: t.transferReference }, { proofFile: { checksum: t.proofFile.checksum } }]), { payment: { payerUserId: item.payerUserId, amount: item.amount } }] } });
-    res.json({ ...item, transfers, possibleDuplicates: duplicates, bankAccounts: (item.metadata as { bankAccounts?: unknown }).bankAccounts || settingsOf((await db.tenant.findUniqueOrThrow({ where: { id: req.admin!.tenantId } })).settings).bankAccounts });
+    const requestId = (item.metadata as { requestId?: string }).requestId;
+    const lead = requestId ? await db.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.admin!.tenantId }, select: { id: true, title: true, status: true } }) : null;
+    res.json({ ...item, transfers, lead, possibleDuplicates: duplicates, bankAccounts: (item.metadata as { bankAccounts?: unknown }).bankAccounts || settingsOf((await db.tenant.findUniqueOrThrow({ where: { id: req.admin!.tenantId } })).settings).bankAccounts });
   }));
   router.post('/payments/transfers/:id/approve', allow('payments.review'), wrap(async (req, res) => {
     const c = req.admin!;
@@ -240,9 +242,11 @@ export function adminRouter(db: PrismaClient, secret: string) {
       serviceRequests: { where: { tenantId: c.tenantId }, select: { id: true, title: true, status: true, createdAt: true }, take: 20, orderBy: { createdAt: 'desc' } },
     } });
     if (!user) { res.status(404).end(); return; }
-    const purchases = user.professionalProfile ? await db.leadPurchase.findMany({ where: { tenantId: c.tenantId, professionalId: user.professionalProfile.id }, select: { id: true, status: true, costUSD: true, request: { select: { title: true } } }, take: 20, orderBy: { purchasedAt: 'desc' } }) : [];
-    const payments = await db.payment.findMany({ where: { tenantId: c.tenantId, payerUserId: user.id }, select: { id: true, amount: true, status: true, method: true, createdAt: true }, take: 20, orderBy: { createdAt: 'desc' } });
-    res.json({ ...user, purchases, payments });
+    const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: c.tenantId, userId: user.id } }, select: { status: true } });
+    const isAdmin = membership?.status === 'active';
+    const purchases = user.role === 'pro' && !isAdmin && user.professionalProfile ? await db.leadPurchase.findMany({ where: { tenantId: c.tenantId, professionalId: user.professionalProfile.id }, select: { id: true, status: true, costUSD: true, request: { select: { title: true } } }, take: 20, orderBy: { purchasedAt: 'desc' } }) : [];
+    const payments = user.role === 'pro' && !isAdmin ? await db.payment.findMany({ where: { tenantId: c.tenantId, payerUserId: user.id }, select: { id: true, amount: true, status: true, method: true, createdAt: true }, take: 20, orderBy: { createdAt: 'desc' } }) : [];
+    res.json({ ...user, isAdmin, purchases, payments });
   }));
   router.patch('/users/:id/status', allow('users.manage'), wrap(async (req, res) => {
     const c = req.admin!; const active = req.body?.active; const reason = String(req.body?.reason || '').trim();

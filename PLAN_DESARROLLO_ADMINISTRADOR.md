@@ -1,5 +1,7 @@
 # Plan de desarrollo: panel administrativo, pagos y arquitectura multitenant
 
+> Documento histórico de planificación. Para el comportamiento actual y el primer MVP comercial, consulta [Estado actual y primer MVP](docs/ESTADO_ACTUAL_Y_MVP.md). Las secciones de diagnóstico y fases describen el estado al redactar el plan, no el código vigente.
+
 ## 1. Propósito
 
 Construir un panel administrativo seguro para operar ArtoCamello. El panel permitirá consultar, revisar y aprobar o rechazar pagos realizados por transferencia bancaria; gestionar clientes, profesionales y usuarios administrativos; y dejar una base de pagos extensible para habilitar tarjeta con un proveedor certificado posteriormente.

@@ -559,6 +559,9 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
       return;
     }
 
+    const adminMembership = await prisma.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: req.user!.tenantId, userId: requestingUser.id } }, select: { status: true } });
+    if (adminMembership?.status === 'active') { res.status(403).json({ error: 'Las cuentas administrativas no realizan pagos.' }); return; }
+
     const realProfId = requestingUser.professionalProfile.id;
 
     const request = await prisma.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
@@ -797,6 +800,8 @@ app.get('/api/payments/history', authenticateToken, async (req: AuthRequest, res
       res.status(403).json({ error: 'No autorizado' });
       return;
     }
+    const adminMembership = await prisma.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: req.user!.tenantId, userId: requestingUser.id } }, select: { status: true } });
+    if (adminMembership?.status === 'active') { res.status(403).json({ error: 'Las cuentas administrativas no tienen historial de compras' }); return; }
 
     const payments = await prisma.payment.findMany({
       where: { payerUserId: req.user!.userId, tenantId: req.user!.tenantId, status: 'allocated' },

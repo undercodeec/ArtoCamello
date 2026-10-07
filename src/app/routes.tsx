@@ -26,7 +26,7 @@ import { AdminClaim } from "./components/admin/AdminClaim";
 import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
 import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDemo } from "./components/admin/AdminDemo";
-import { isAdminHost } from './adminHost';
+import { isAdminHost, isLocalAdminPreview } from './adminHost';
 
 const publicRoutes = [
   {
@@ -101,8 +101,11 @@ const publicRoutes = [
 const adminRoutes = [
   { path: '/claim', Component: AdminClaim },
   { path: '/login', Component: AdminLogin },
-  { path: '/demo', Component: AdminDemo },
+  ...(import.meta.env.DEV ? [{ path: '/demo', Component: AdminDemo }] : []),
   { path: '/*', Component: AdminPanel },
 ];
 
-export const router = createBrowserRouter(isAdminHost() ? adminRoutes : publicRoutes);
+export const router = createBrowserRouter(
+  isAdminHost() ? adminRoutes : publicRoutes,
+  isLocalAdminPreview() ? { basename: '/admin' } : undefined,
+);

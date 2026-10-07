@@ -22,8 +22,9 @@ export type AdminMe = { tenantId: string; role: string; permissions: string[] };
 export type Payment = {
   id: string; reference: string; amount: string; currency: string; method: string; status: string; createdAt: string;
   leadTitle?: string;
+  lead?: { id: string; title: string; status: string } | null;
   payer: { id: string; fullName: string; email: string };
-  transfers?: Array<{ id: string; bankName: string; declaredAmount: string | null; transferReference: string; transferredAt: string; createdAt: string; proofUrl: string; reviewNote?: string; reviewer?: { fullName: string } }>;
+  transfers?: Array<{ id: string; bankName: string; declaredAmount: string | null; transferReference: string; transferredAt: string; createdAt: string; proofUrl: string; proofMimeType?: string; reviewNote?: string; reviewer?: { fullName: string } }>;
   possibleDuplicates?: number; bankAccounts?: Array<{ bankName: string; accountName: string; accountNumber: string }>;
   events?: Array<{ id: string; type: string; source: string; createdAt: string }>;
   allocations?: Array<{ id: string; subjectId: string; amount: string }>;

@@ -56,8 +56,9 @@ export function AdminPanel() {
   if (!me) return <main className="p-8">Verificando acceso...</main>;
   const sub = pathname || '/';
   const permissions = new Set(me.permissions);
-  const selected = nav.find(([path]) => path === sub);
-  if (selected && !permissions.has(selected[2])) return <main className="p-8">Permiso insuficiente</main>;
+  const paymentDetailMatch = sub === '/payments/transfers' ? null : /^\/payments\/([^/]+)$/.exec(sub);
+  const selected = nav.find(([path]) => path === sub) || (paymentDetailMatch ? nav.find(([path]) => path === '/payments') : undefined);
+  if ((selected && !permissions.has(selected[2])) || (paymentDetailMatch && !permissions.has('payments.read'))) return <main className="p-8">Permiso insuficiente</main>;
   const userName = getCurrentUser()?.fullName || 'Administrador';
   const initials = userName.charAt(0).toUpperCase();
   const signOut = () => { logout(); window.location.assign(publicAppUrl()); };
@@ -76,6 +77,7 @@ export function AdminPanel() {
       {sub === '/' && <Dashboard />}
       {sub === '/payments/transfers' && <Payments transfers permissions={permissions} />}
       {sub === '/payments' && <Payments permissions={permissions} />}
+      {paymentDetailMatch && <PaymentDetailPage id={decodeURIComponent(paymentDetailMatch[1])} canReview={permissions.has('payments.review')} />}
       {sub === '/users/clients' && <Users role="client" permissions={permissions} />}
       {sub === '/users/professionals' && <Users role="pro" permissions={permissions} />}
       {sub === '/access/admins' && <Admins permissions={permissions} />}
@@ -156,11 +158,12 @@ function Dashboard() {
 }
 
 function Payments({ transfers = false, permissions }: { transfers?: boolean; permissions: Set<string> }) {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState('');
   const [reference, setReference] = useState('');
   const [bank, setBank] = useState(''); const [minAmount, setMinAmount] = useState(''); const [maxAmount, setMaxAmount] = useState(''); const [dateFrom, setDateFrom] = useState(''); const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<string | null>(null);
+  const setSelected = (id: string) => navigate(`/payments/${encodeURIComponent(id)}`);
   const query = new URLSearchParams({ status: filter, reference, bank, minAmount, maxAmount, dateFrom, dateTo });
   const path = `/payments${transfers ? '/transfers' : ''}?page=${page}&${query}`;
   const { data, error, loading, reload } = useData<List<Payment>>(path);
@@ -172,44 +175,93 @@ function Payments({ transfers = false, permissions }: { transfers?: boolean; per
   return <section><div className="flex flex-wrap items-center justify-between gap-3 mb-5"><h1 className="text-3xl font-bold">{transfers ? 'Transferencias' : 'Todos los pagos'}</h1>{permissions.has('payments.export') && <button onClick={exportCsv} className={button}>Exportar CSV</button>}</div>
     <div className="flex flex-wrap gap-2 mb-4"><select className={input} value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }}><option value="">Todos los estados</option>{['awaiting_transfer','under_review','approved','allocated','rejected','failed','expired','pending_provider'].map(s => <option key={s} value={s}>{status[s] || s}</option>)}</select><input className={input} placeholder="Buscar referencia" value={reference} onChange={e => { setReference(e.target.value); setPage(1); }} /><input className={input} placeholder="Banco" value={bank} onChange={e => { setBank(e.target.value); setPage(1); }} /><input className={`${input} w-28`} type="number" min="0" placeholder="Monto mín." value={minAmount} onChange={e => { setMinAmount(e.target.value); setPage(1); }} /><input className={`${input} w-28`} type="number" min="0" placeholder="Monto máx." value={maxAmount} onChange={e => { setMaxAmount(e.target.value); setPage(1); }} /><label className="text-xs">Desde<input className={`${input} block`} type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} /></label><label className="text-xs">Hasta<input className={`${input} block`} type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1); }} /></label></div>
     {error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : <><div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Referencia</th><th>Pagador</th>{transfers && <><th>Lead</th><th>Banco / Ref. declarada</th><th>Transferencia / Envío</th><th>Revisor</th></>}<th>Monto</th><th>Método</th><th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody>{data?.items.map(p => <tr key={p.id} className="border-t"><td className="p-3 font-mono">{p.reference}</td><td>{p.payer.fullName}</td>{transfers && <><td>{p.leadTitle}</td><td>{p.transfers?.[0] ? `${p.transfers[0].bankName} / ${p.transfers[0].transferReference}` : 'Pendiente'}</td><td>{p.transfers?.[0] ? `${date(p.transfers[0].transferredAt)} / ${date(p.transfers[0].createdAt)}` : '—'}</td><td>{p.transfers?.[0]?.reviewer?.fullName || 'Pendiente'}</td></>}<td>{money(p.amount,p.currency)}</td><td>{p.method}</td><td>{status[p.status] || p.status}</td><td>{date(p.createdAt)}</td><td><button className="underline text-blue-700" onClick={() => setSelected(p.id)}>Detalle</button></td></tr>)}</tbody></table>{!data?.items.length && <p className="p-5">Sin pagos para estos filtros.</p>}</div><Pager page={page} total={data?.total || 0} onPage={setPage} /></>}
-    {selected && <PaymentDetail id={selected} canReview={permissions.has('payments.review')} onClose={() => setSelected(null)} onChanged={reload} />}
   </section>;
 }
 
-function PaymentDetail({ id, canReview, onClose, onChanged }: { id: string; canReview: boolean; onClose: () => void; onChanged: () => void }) {
+function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }) {
+  const navigate = useNavigate();
   const { data, error, loading, reload } = useData<Payment>(`/payments/${id}`);
-  const [note, setNote] = useState(''); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
   const openProof = async (url: string) => {
     const tab = window.open('', '_blank');
     try {
-      const response = await fetch(`${(import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '')}${url}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
+      const response = await fetch(`${(import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '')}${url}`, { headers: proofHeaders() });
       if (!response.ok) throw new Error('No se pudo abrir el comprobante');
-      const objectUrl = URL.createObjectURL(await response.blob()); if (tab) tab.location.href = objectUrl; setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
-    } catch (error) { tab?.close(); setMessage((error as Error).message); }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (tab) tab.location.href = objectUrl;
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch (openError) { tab?.close(); setMessage((openError as Error).message); }
   };
   const decide = async (decision: 'approve' | 'reject') => {
     if (note.trim().length < 5) { setMessage('Escribe una nota de al menos 5 caracteres.'); return; }
-    if (!window.confirm(decision === 'approve' ? '¿Confirmas que la transferencia llegó a la cuenta indicada?' : '¿Confirmas el rechazo?')) return;
+    const confirmation = decision === 'approve' ? 'Confirma que la transferencia llegó a la cuenta indicada.' : 'Confirma el rechazo de este comprobante.';
+    if (!window.confirm(confirmation)) return;
     setBusy(true); setMessage('');
-    try { await adminRequest(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) }); setMessage(decision === 'approve' ? 'Pago aprobado' : 'Pago rechazado'); reload(); onChanged(); }
-    catch (e) { setMessage((e as Error).message); } finally { setBusy(false); }
+    try {
+      await adminRequest(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) });
+      setMessage(decision === 'approve' ? 'Pago aprobado y contacto desbloqueado.' : 'Comprobante rechazado.');
+      reload();
+    } catch (decisionError) { setMessage((decisionError as Error).message); } finally { setBusy(false); }
   };
   const reconcile = async () => {
     if (!window.confirm('¿Consultar este pago directamente en Kushki?')) return;
     setBusy(true); setMessage('');
-    try { const result = await adminRequest<{ status?: string; payment: Payment }>(`/payments/cards/${id}/reconcile`, { method: 'POST' }); setMessage(result.status ? `Estado en Kushki: ${result.status}` : 'Pago conciliado'); reload(); onChanged(); }
-    catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
+    try {
+      const result = await adminRequest<{ status?: string }>(`/payments/cards/${id}/reconcile`, { method: 'POST' });
+      setMessage(result.status ? `Estado en Kushki: ${result.status}` : 'Pago conciliado.');
+      reload();
+    } catch (reconcileError) { setMessage((reconcileError as Error).message); } finally { setBusy(false); }
   };
-  return <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-auto" role="dialog" aria-modal="true"><div className="bg-white max-w-2xl mx-auto my-8 p-6 rounded-xl shadow-xl"><button onClick={onClose} className="float-right underline">Cerrar</button><h2 className="text-2xl font-bold mb-4">Detalle del pago</h2>
-    {error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <div className="space-y-3 text-sm"><p><b>Referencia:</b> {data.reference}</p><p><b>Pagador:</b> {data.payer.fullName} ({data.payer.email})</p><p><b>Monto:</b> {money(data.amount,data.currency)} · <b>Estado:</b> {status[data.status] || data.status}</p>
-      {data.possibleDuplicates ? <p className="bg-amber-100 p-3 rounded">Posibles comprobantes o referencias repetidas: {data.possibleDuplicates}. Revisa antes de aprobar.</p> : null}
-      {data.bankAccounts?.map(a => <p key={a.accountNumber} className="bg-gray-50 p-3 rounded"><b>Cuenta de destino:</b> {a.bankName} · {a.accountName} · {a.accountNumber}</p>)}
-      {data.transfers?.map(t => <div key={t.id} className="border p-3 rounded"><p><b>Banco origen:</b> {t.bankName} · <b>Referencia declarada:</b> {t.transferReference}</p><p><b>Monto declarado:</b> {t.declaredAmount === null ? 'No registrado (comprobante anterior)' : money(t.declaredAmount, data.currency)}</p>{t.declaredAmount !== null && Number(t.declaredAmount) !== Number(data.amount) && <p className="text-red-700 font-semibold">El monto declarado no coincide con el pago esperado. Rechaza este comprobante.</p>}<p>Transferida: {date(t.transferredAt)} · Enviada: {date(t.createdAt)}</p><p>Revisor: {t.reviewer?.fullName || 'Pendiente'} · {t.reviewNote || ''}</p><button className="underline text-blue-700" onClick={() => openProof(t.proofUrl)}>Ver comprobante</button></div>)}
+  const transferCount = data?.transfers?.length || 0;
+  return <section className="max-w-6xl">
+    <button onClick={() => navigate('/payments')} className="underline text-sm text-blue-700 mb-4">← Volver a todos los pagos</button>
+    <div className="flex flex-wrap items-start justify-between gap-3 mb-6"><div><h1 className="text-3xl font-bold">Detalle del pago</h1><p className="text-gray-600 mt-1">Revisa la información y el comprobante enviado por el profesional.</p></div>{data && <span className="bg-gray-100 rounded-full px-3 py-1 text-sm font-medium">{status[data.status] || data.status}</span>}</div>
+    {error && <p className="text-red-600">{error}</p>}
+    {loading ? 'Cargando...' : data && <div className="space-y-5">
+      <div className="bg-white border rounded-xl p-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+        <p><b>Referencia</b><br /><span className="font-mono break-all">{data.reference}</span></p>
+        <p><b>Pagador</b><br />{data.payer.fullName}<br /><span className="text-gray-600">{data.payer.email}</span></p>
+        <p><b>Monto</b><br />{money(data.amount, data.currency)}</p>
+        <p><b>Método</b><br />{data.method}</p>
+        <p><b>Creado</b><br />{date(data.createdAt)}</p>
+        {data.lead && <p><b>Solicitud</b><br />{data.lead.title}<br /><span className="text-gray-600">{data.lead.status}</span></p>}
+      </div>
+      {data.possibleDuplicates ? <p className="bg-amber-100 p-3 rounded text-sm">Posibles comprobantes o referencias repetidas: {data.possibleDuplicates}. Revisa antes de aprobar.</p> : null}
+      {!!data.bankAccounts?.length && <div className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-3">Cuenta receptora</h2>{data.bankAccounts.map(a => <p key={`${a.bankName}-${a.accountNumber}`} className="bg-gray-50 p-3 rounded text-sm"><b>{a.bankName}</b> · {a.accountName} · {a.accountNumber}</p>)}</div>}
+      {data.transfers?.map((transfer, index) => <div key={transfer.id} className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-4">Comprobante {transferCount > 1 ? `#${transferCount - index}` : ''}</h2><div className="grid gap-4 lg:grid-cols-2"><div className="space-y-2 text-sm"><p><b>Banco de origen:</b> {transfer.bankName}</p><p><b>Referencia declarada:</b> {transfer.transferReference}</p><p><b>Monto declarado:</b> {transfer.declaredAmount === null ? 'No registrado (comprobante anterior)' : money(transfer.declaredAmount, data.currency)}</p>{transfer.declaredAmount !== null && Number(transfer.declaredAmount) !== Number(data.amount) && <p className="text-red-700 font-semibold">El monto declarado no coincide con el pago esperado. Rechaza este comprobante.</p>}<p><b>Transferida:</b> {date(transfer.transferredAt)}</p><p><b>Enviada por el profesional:</b> {date(transfer.createdAt)}</p><p><b>Revisor:</b> {transfer.reviewer?.fullName || 'Pendiente'}{transfer.reviewNote ? ` · ${transfer.reviewNote}` : ''}</p></div><PrivateProofPreview proofUrl={transfer.proofUrl} mimeType={transfer.proofMimeType} onOpen={() => openProof(transfer.proofUrl)} /></div></div>)}
+      {data.method === 'transfer' && !transferCount && <div className="bg-white border rounded-xl p-5 text-sm text-gray-600">El profesional todavía no ha enviado un comprobante.</div>}
       {canReview && data.method === 'card' && data.status !== 'allocated' && <button disabled={busy} className={button} onClick={reconcile}>Conciliar con Kushki</button>}
-      {!!data.allocations?.length && <div><b>Asignaciones:</b> {data.allocations.map(a => <p key={a.id}>{a.subjectId} · {money(a.amount,data.currency)}</p>)}</div>}
-      {!!data.events?.length && <div><b>Eventos:</b> {data.events.map(e => <p key={e.id}>{date(e.createdAt)} · {e.source} · {e.type}</p>)}</div>}
-      {canReview && data.method === 'transfer' && data.status === 'under_review' && <div className="border-t pt-4"><label className="block font-semibold mb-1">Nota de revisión (obligatoria)</label><textarea className={`${input} w-full`} rows={3} value={note} onChange={e => setNote(e.target.value)} /><div className="flex gap-2 mt-2"><button disabled={busy} className={button} onClick={() => decide('approve')}>Aprobar y desbloquear</button><button disabled={busy} className="bg-red-700 text-white px-4 py-2 rounded-lg" onClick={() => decide('reject')}>Rechazar</button></div></div>}{message && <p className="font-medium">{message}</p>}</div>}
-  </div></div>;
+      {!!data.allocations?.length && <div className="bg-white border rounded-xl p-5 text-sm"><b>Asignaciones</b>{data.allocations.map(allocation => <p key={allocation.id} className="mt-2">{allocation.subjectId} · {money(allocation.amount, data.currency)}</p>)}</div>}
+      {!!data.events?.length && <div className="bg-white border rounded-xl p-5 text-sm"><b>Historial del pago</b>{data.events.map(event => <p key={event.id} className="border-t mt-2 pt-2">{date(event.createdAt)} · {event.source} · {event.type}</p>)}</div>}
+      {canReview && data.method === 'transfer' && data.status === 'under_review' && <div className="bg-white border rounded-xl p-5"><label className="block font-semibold mb-1">Nota de revisión (obligatoria)</label><textarea className={`${input} w-full`} rows={3} value={note} onChange={event => setNote(event.target.value)} /><div className="flex flex-wrap gap-2 mt-2"><button disabled={busy} className={button} onClick={() => decide('approve')}>Aprobar y desbloquear</button><button disabled={busy} className="bg-red-700 text-white px-4 py-2 rounded-lg disabled:opacity-50" onClick={() => decide('reject')}>Rechazar</button></div></div>}
+      {message && <p className="font-medium">{message}</p>}
+    </div>}
+  </section>;
+}
+
+function proofHeaders() {
+  return { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' };
+}
+
+function PrivateProofPreview({ proofUrl, mimeType, onOpen }: { proofUrl: string; mimeType?: string; onOpen: () => void }) {
+  const [imageUrl, setImageUrl] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(Boolean(mimeType?.startsWith('image/')));
+  useEffect(() => {
+    if (!mimeType?.startsWith('image/')) { setImageUrl(''); setLoading(false); return; }
+    let active = true;
+    let objectUrl = '';
+    setLoading(true); setImageUrl(''); setError('');
+    fetch(`${(import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '')}${proofUrl}`, { headers: proofHeaders() })
+      .then(response => { if (!response.ok) throw new Error('No se pudo cargar la imagen'); return response.blob(); })
+      .then(blob => { objectUrl = URL.createObjectURL(blob); if (active) setImageUrl(objectUrl); else URL.revokeObjectURL(objectUrl); })
+      .catch(loadError => { if (active) setError((loadError as Error).message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [proofUrl, mimeType]);
+  return <div className="border rounded-lg bg-gray-50 p-3"><p className="font-semibold text-sm mb-2">Archivo cargado</p>{loading && <p className="text-sm text-gray-600">Cargando imagen…</p>}{imageUrl && <img src={imageUrl} alt="Comprobante de transferencia enviado por el profesional" className="w-full max-h-[30rem] object-contain bg-white rounded border" />}{!loading && !imageUrl && !error && <p className="text-sm text-gray-600">Comprobante en PDF.</p>}{error && <p className="text-sm text-red-700">{error}</p>}<button className="underline text-blue-700 text-sm mt-3" onClick={onOpen}>Abrir comprobante</button></div>;
 }
 
 function Users({ role, permissions }: { role: 'client' | 'pro'; permissions: Set<string> }) {
@@ -222,8 +274,8 @@ function Users({ role, permissions }: { role: 'client' | 'pro'; permissions: Set
 }
 
 function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data, error, loading } = useData<{ fullName: string; email: string; phone?: string; role: string; active: boolean; professionalProfile?: { businessName?: string; bio?: string; categories: string[]; verified: boolean; documentType?: string; documentId?: string }; serviceRequests: Array<{ id: string; title: string; status: string }>; purchases: Array<{ id: string; request: { title: string }; status: string; costUSD: number }>; payments: Array<{ id: string; status: string; amount: string }> }>(`/users/${id}`);
-  return <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-auto" role="dialog" aria-modal="true"><div className="bg-white max-w-2xl mx-auto my-8 p-6 rounded-xl shadow-xl"><button onClick={onClose} className="float-right underline">Cerrar</button><h2 className="text-2xl font-bold mb-4">Perfil</h2>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <div className="space-y-4 text-sm"><p><b>{data.fullName}</b> · {data.email} · {data.phone || 'Sin teléfono'} · {data.active ? 'Activo' : 'Suspendido'}</p>{data.professionalProfile && <div><h3 className="font-bold">Profesional</h3><p>{data.professionalProfile.businessName} · {data.professionalProfile.verified ? 'Verificado' : 'Pendiente'}</p><p>{data.professionalProfile.bio}</p><p>Categorías: {data.professionalProfile.categories.join(', ')}</p><p>Documento: {data.professionalProfile.documentType || 'No registrado'} {data.professionalProfile.documentId || ''}</p></div>}<div><h3 className="font-bold">Solicitudes</h3>{data.serviceRequests.map(r => <p key={r.id}>{r.title} · {r.status}</p>)}</div><div><h3 className="font-bold">Leads adquiridos</h3>{data.purchases.map(p => <p key={p.id}>{p.request.title} · {p.status} · ${p.costUSD.toFixed(2)}</p>)}</div><div><h3 className="font-bold">Pagos</h3>{data.payments.map(p => <p key={p.id}>{p.id} · {p.status} · {money(p.amount)}</p>)}</div></div>}</div></div>;
+  const { data, error, loading } = useData<{ fullName: string; email: string; phone?: string; role: string; isAdmin: boolean; active: boolean; professionalProfile?: { businessName?: string; bio?: string; categories: string[]; verified: boolean; documentType?: string; documentId?: string }; serviceRequests: Array<{ id: string; title: string; status: string }>; purchases: Array<{ id: string; request: { title: string }; status: string; costUSD: number }>; payments: Array<{ id: string; status: string; amount: string }> }>(`/users/${id}`);
+  return <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-auto" role="dialog" aria-modal="true"><div className="bg-white max-w-2xl mx-auto my-8 p-6 rounded-xl shadow-xl"><button onClick={onClose} className="float-right underline">Cerrar</button><h2 className="text-2xl font-bold mb-4">Perfil</h2>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <div className="space-y-4 text-sm"><p><b>{data.fullName}</b> · {data.email} · {data.phone || 'Sin teléfono'} · {data.active ? 'Activo' : 'Suspendido'}</p>{data.professionalProfile && <div><h3 className="font-bold">Profesional</h3><p>{data.professionalProfile.businessName} · {data.professionalProfile.verified ? 'Verificado' : 'Pendiente'}</p><p>{data.professionalProfile.bio}</p><p>Categorías: {data.professionalProfile.categories.join(', ')}</p><p>Documento: {data.professionalProfile.documentType || 'No registrado'} {data.professionalProfile.documentId || ''}</p></div>}{data.role === 'client' && <div><h3 className="font-bold">Solicitudes</h3>{data.serviceRequests.length ? data.serviceRequests.map(r => <p key={r.id}>{r.title} · {r.status}</p>) : <p>Sin solicitudes.</p>}</div>}{data.role === 'pro' && !data.isAdmin && <><div><h3 className="font-bold">Contactos adquiridos</h3>{data.purchases.length ? data.purchases.map(p => <p key={p.id}>{p.request.title} · {p.status} · ${p.costUSD.toFixed(2)}</p>) : <p>Sin contactos adquiridos.</p>}</div><div><h3 className="font-bold">Pagos por contactos</h3>{data.payments.length ? data.payments.map(p => <p key={p.id}>{p.id} · {p.status} · {money(p.amount)}</p>) : <p>Sin pagos.</p>}</div></>}</div>}</div></div>;
 }
 
 function Admins({ permissions }: { permissions: Set<string> }) {

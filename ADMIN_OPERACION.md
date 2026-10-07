@@ -1,5 +1,7 @@
 # Operación del panel administrativo
 
+El alcance comercial y el estado de implementación del MVP están en [Estado actual y primer MVP](docs/ESTADO_ACTUAL_Y_MVP.md). Los pagos listados aquí son compras de contacto realizadas por profesionales; los administradores los supervisan o concilian según sus permisos y los clientes no pagan por sus solicitudes.
+
 ## Decisiones iniciales
 
 - El tenant inicial es `artocamello`. Cada marketplace futuro tendrá su propio tenant y dominio registrado.
