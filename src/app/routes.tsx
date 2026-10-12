@@ -27,6 +27,7 @@ import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
 import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDemo } from "./components/admin/AdminDemo";
 import { isAdminHost, isLocalAdminPreview } from './adminHost';
+import { isAdminDemoAvailable } from './adminPreview';
 
 const publicRoutes = [
   {
@@ -101,7 +102,7 @@ const publicRoutes = [
 const adminRoutes = [
   { path: '/claim', Component: AdminClaim },
   { path: '/login', Component: AdminLogin },
-  ...(import.meta.env.DEV ? [{ path: '/demo', Component: AdminDemo }] : []),
+  ...(isAdminDemoAvailable(import.meta.env.DEV) ? [{ path: '/demo', Component: AdminDemo }] : []),
   { path: '/*', Component: AdminPanel },
 ];
 
