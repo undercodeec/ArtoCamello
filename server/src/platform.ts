@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { settingsOf } from './payments';
-import { adminMfaRequired, verifyAdminSession } from './adminMfa';
+import { verifyAdminEmailSession } from './adminMfa';
 
 export function platformRouter(db: PrismaClient, secret: string) {
   const router = express.Router();
@@ -11,10 +11,10 @@ export function platformRouter(db: PrismaClient, secret: string) {
     let claims: jwt.JwtPayload;
     try { claims = jwt.verify(token || '', secret) as jwt.JwtPayload; } catch { res.status(401).end(); return; }
     const user = typeof claims.userId === 'string' ? await db.user.findUnique({ where: { id: claims.userId } }) : null;
-    if (!user?.active || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).end(); return; }
+    if (!user?.active || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).end(); return; }
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: 'artocamello', userId: user.id } }, include: { role: { include: { permissions: { include: { permission: true } } } } } });
     if (!membership || membership.status !== 'active' || membership.role.code !== 'platform_owner' || !membership.role.permissions.some(p => p.permission.code === 'tenants.manage')) { res.status(403).end(); return; }
-    if (adminMfaRequired() && !verifyAdminSession(req.header('x-admin-session'), user.id, 'artocamello', user.sessionVersion, secret)) { res.status(403).json({ error: 'MFA administrativo requerido' }); return; }
+    if (!verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, 'artocamello', user.sessionVersion, secret)) { res.status(403).json({ error: 'Código de acceso administrativo requerido' }); return; }
     res.locals.platformActorId = user.id;
     next();
   })().catch(next); });

@@ -2,17 +2,15 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export async function adminRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = sessionStorage.getItem('authToken');
-  const adminSession = sessionStorage.getItem('adminSession');
   const adminEmailSession = sessionStorage.getItem('adminEmailSession');
   const response = await fetch(`${API}/admin${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${token || ''}`, ...(adminEmailSession ? { 'X-Admin-Email-Session': adminEmailSession } : {}), ...(adminSession ? { 'X-Admin-Session': adminSession } : {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
+    headers: { Authorization: `Bearer ${token || ''}`, ...(adminEmailSession ? { 'X-Admin-Email-Session': adminEmailSession } : {}), ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const error = new Error(body.error || `Error ${response.status}`) as Error & { code?: string };
     error.code = body.code;
-    if (body.code === 'MFA_REQUIRED' || body.code === 'MFA_SETUP_REQUIRED') window.dispatchEvent(new CustomEvent('admin-mfa-required', { detail: body.code }));
     throw error;
   }
   return response.json() as Promise<T>;

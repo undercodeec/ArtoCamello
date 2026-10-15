@@ -6,7 +6,7 @@ import { User, UserRole } from '@/domain/types';
 import {
   getCurrentAuth, getCurrentUser, login as loginService,
   logout as logoutService, register as registerService,
-  googleLogin as googleLoginService, updateRole as updateRoleService,
+  updateRole as updateRoleService,
   AuthState,
 } from '@/services/authService';
 
@@ -15,7 +15,6 @@ interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<User>;
   register: (data: { email: string; password: string; fullName: string; role: UserRole; phone?: string }) => Promise<{ requiresVerification: boolean, message: string; user?: User }>;
-  googleLogin: (credential: string, role?: UserRole) => Promise<User>;
   updateRole: (role: 'client' | 'pro') => Promise<User>;
   logout: () => void;
   isClient: boolean;
@@ -53,12 +52,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return response;
   }, [refresh]);
 
-  const googleLogin = useCallback(async (credential: string, role?: UserRole) => {
-    const u = await googleLoginService(credential, role);
-    refresh();
-    return u;
-  }, [refresh]);
-
   const updateRole = useCallback(async (role: 'client' | 'pro') => {
     const u = await updateRoleService(role);
     refresh();
@@ -75,7 +68,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     login,
     register,
-    googleLogin,
     updateRole,
     logout,
     isClient: auth.role === UserRole.CLIENT,

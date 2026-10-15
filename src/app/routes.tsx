@@ -8,7 +8,6 @@ import { SearchResultsPage } from "./components/SearchResultsPage";
 import { ProProfilePage } from "./components/ProProfilePage";
 import { MyRequestsPage } from "./components/MyRequestsPage";
 import { ClientProfilePage } from "./components/ClientProfilePage";
-import { VerifyEmail } from "./pages/VerifyEmail";
 import { PaymentSuccess } from "./pages/PaymentSuccess";
 import { PaymentFailed } from "./pages/PaymentFailed";
 import { RouteGuard } from "@/shared/components/RouteGuard";
@@ -22,7 +21,6 @@ import { MyContacts } from "./components/dashboard/MyContacts";
 import { WalletBilling } from "./components/dashboard/WalletBilling";
 import { ProProfileSettings } from "./components/dashboard/ProProfileSettings";
 import { AdminPanel } from "./components/admin/AdminPanel";
-import { AdminClaim } from "./components/admin/AdminClaim";
 import { TransferPaymentPage } from "./components/dashboard/TransferPayment";
 import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDemo } from "./components/admin/AdminDemo";
@@ -74,10 +72,6 @@ const publicRoutes = [
         ),
       },
       {
-        path: "/verify",
-        Component: VerifyEmail,
-      },
-      {
         path: "/dashboard",
         element: (
           <RouteGuard allowedRoles={[UserRole.PROFESSIONAL]}>
@@ -100,7 +94,6 @@ const publicRoutes = [
 ];
 
 const adminRoutes = [
-  { path: '/claim', Component: AdminClaim },
   { path: '/login', Component: AdminLogin },
   ...(isAdminDemoAvailable(import.meta.env.DEV) ? [{ path: '/demo', Component: AdminDemo }] : []),
   { path: '/*', Component: AdminPanel },

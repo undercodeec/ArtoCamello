@@ -2,12 +2,11 @@ import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { allocateLead, PaymentConflict, settingsOf } from './payments';
-import { createHmac, createHash, timingSafeEqual, randomBytes } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import nodemailer from 'nodemailer';
-import bcrypt from 'bcrypt';
-import { adminEmailCodeRequired, adminMfaRequired, verifyAdminEmailSession, verifyAdminSession } from './adminMfa';
+import { verifyAdminEmailSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 
 type Context = { tenantId: string; actorId: string; permissions: Set<string>; role: string };
@@ -30,6 +29,7 @@ function adminAppBaseUrl(): string {
 
 export function adminRouter(db: PrismaClient, secret: string) {
   const router = express.Router();
+  /* Legacy invitation-claim routes are disabled. Administrators enter with an email code.
   router.post('/invitations/claim', wrap(async (req, res) => {
     const token = String(req.body?.token || ''); const password = String(req.body?.password || '');
     if (!/^[0-9a-f]{64}$/.test(token) || password.length < 12 || password.length > 200) { res.status(400).json({ error: 'Enlace o contraseña inválidos' }); return; }
@@ -73,6 +73,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } } });
     res.json({ pending: membership?.status === 'invited' });
   }));
+  */
   router.use((req: AdminRequest, res: Response, next: NextFunction) => { (async () => {
     const token = /^Bearer (.+)$/.exec(req.header('authorization') || '')?.[1];
     if (!token) { res.status(401).json({ error: 'Sesión requerida' }); return; }
@@ -81,18 +82,14 @@ export function adminRouter(db: PrismaClient, secret: string) {
     catch { res.status(401).json({ error: 'Sesión inválida' }); return; }
     if (typeof claims.userId !== 'string') { res.status(401).json({ error: 'Sesión inválida' }); return; }
     const user = await db.user.findUnique({ where: { id: claims.userId } });
-    if (!user?.active || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión administrativa no disponible' }); return; }
+    if (!user?.active || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión administrativa no disponible' }); return; }
     const hostname = req.hostname.toLowerCase();
     const domain = await db.tenantDomain.findUnique({ where: { hostname } });
     const tenantId = ['localhost', '127.0.0.1'].includes(hostname) ? user.tenantId : domain?.tenantId;
     if (!tenantId) { res.status(404).end(); return; }
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } }, include: { role: { include: { permissions: { include: { permission: true } } } } } });
     if (!membership || membership.status !== 'active' || membership.role.tenantId !== tenantId) { res.status(403).json({ error: 'Sin membresía activa en este tenant' }); return; }
-    if (adminEmailCodeRequired() && !verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma el código enviado a tu correo para acceder al panel', code: 'EMAIL_CODE_REQUIRED' }); return; }
-    if (adminMfaRequired()) {
-      if (!user.mfaSecret) { res.status(403).json({ error: 'Configura MFA para acceder al panel', code: 'MFA_SETUP_REQUIRED' }); return; }
-      if (!verifyAdminSession(req.header('x-admin-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma tu código MFA para acceder al panel', code: 'MFA_REQUIRED' }); return; }
-    }
+    if (!verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma el código enviado a tu correo para acceder al panel', code: 'EMAIL_CODE_REQUIRED' }); return; }
     req.admin = { tenantId, actorId: user.id, role: membership.role.code, permissions: new Set(membership.role.permissions.map(p => p.permission.code)) };
     next();
   })().catch(next); });
@@ -276,26 +273,19 @@ export function adminRouter(db: PrismaClient, secret: string) {
     let user = await db.user.findUnique({ where: { email } });
     const previous = user ? await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: c.tenantId, userId: user.id } } }) : null;
     if (previous?.status === 'active') { res.status(409).json({ error: 'El usuario ya es administrador' }); return; }
-    if (user && !user.emailVerified && !previous) { res.status(400).json({ error: 'El usuario existente debe verificar su correo' }); return; }
-    const needsClaim = !user || !user.emailVerified;
-    if (needsClaim && (!process.env.SMTP_USER || !process.env.SMTP_PASS)) { res.status(503).json({ error: 'Configura SMTP para invitar usuarios nuevos' }); return; }
-    const claimToken = needsClaim ? randomBytes(32).toString('hex') : null;
-    const claimHash = claimToken ? createHash('sha256').update(claimToken).digest('hex') : null;
-    if (!user) user = await db.user.create({ data: { tenantId: c.tenantId, email, fullName: String(req.body?.fullName || email.split('@')[0]).slice(0, 100), role: 'guest', emailVerified: false, verificationToken: claimHash } });
-    else if (claimHash) await db.user.update({ where: { id: user.id }, data: { verificationToken: claimHash } });
-    const membership = await db.tenantMembership.upsert({ where: { tenantId_userId: { tenantId: c.tenantId, userId: user.id } }, update: { roleId, status: 'invited', invitedAt: new Date(), acceptedAt: null }, create: { tenantId: c.tenantId, userId: user.id, roleId, status: 'invited' } });
+    if (!user) user = await db.user.create({ data: { tenantId: c.tenantId, email, fullName: String(req.body?.fullName || email.split('@')[0]).slice(0, 100), role: 'guest', emailVerified: true } });
+    const membership = await db.tenantMembership.upsert({ where: { tenantId_userId: { tenantId: c.tenantId, userId: user.id } }, update: { roleId, status: 'active', invitedAt: new Date(), acceptedAt: new Date() }, create: { tenantId: c.tenantId, userId: user.id, roleId, status: 'active', acceptedAt: new Date() } });
     await audit(c, req, 'admins.invite', 'TenantMembership', membership.id, undefined, { email, role: role.code });
     const invitationBase = adminAppBaseUrl();
     let delivered = false;
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
         const mail = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-        const url = claimToken ? `${invitationBase}/claim?token=${claimToken}` : `${invitationBase}/`;
-        await mail.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'Invitación al panel ArtoCamello', text: claimToken ? `Crea tu contraseña y acepta la invitación: ${url}` : `Inicia sesión con tu cuenta verificada y acepta la invitación en ${url}` });
+        await mail.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'Acceso al panel ArtoCamello', text: `Tu acceso administrativo está listo. Ingresa con un código enviado a tu correo: ${invitationBase}/login` });
         delivered = true;
       } catch (error) { console.error('Invitation email failed', error); }
     }
-    res.status(201).json({ ...membership, delivered, requiresEmailDelivery: Boolean(claimToken), acceptUrl: claimToken ? undefined : `${invitationBase}/` });
+    res.status(201).json({ ...membership, delivered });
   }));
   router.patch('/memberships/:id', allow('admins.manage'), wrap(async (req, res) => {
     const c = req.admin!; const m = await db.tenantMembership.findFirst({ where: { id: req.params.id, tenantId: c.tenantId }, include: { role: { include: { permissions: { include: { permission: true } } } } } });

@@ -44,15 +44,12 @@ export function AdminPanel() {
   const [me, setMe] = useState<AdminMe | null>(null);
   const [error, setError] = useState('');
   const [emailCode, setEmailCode] = useState(false);
-  const [mfa, setMfa] = useState<'setup' | 'verify' | null>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const loadAccess = () => adminRequest<AdminMe>('/me').then(value => { setMe(value); setError(''); setEmailCode(false); setMfa(null); }).catch((e: Error & { code?: string }) => { if (e.code === 'EMAIL_CODE_REQUIRED') setEmailCode(true); else if (e.code === 'MFA_SETUP_REQUIRED') setMfa('setup'); else if (e.code === 'MFA_REQUIRED') setMfa('verify'); else setError(e.message); });
+  const loadAccess = () => adminRequest<AdminMe>('/me').then(value => { setMe(value); setError(''); setEmailCode(false); }).catch((e: Error & { code?: string }) => { if (e.code === 'EMAIL_CODE_REQUIRED') setEmailCode(true); else setError(e.message); });
   useEffect(() => { loadAccess(); }, []);
-  useEffect(() => { const listener = (event: Event) => setMfa((event as CustomEvent<string>).detail === 'MFA_SETUP_REQUIRED' ? 'setup' : 'verify'); window.addEventListener('admin-mfa-required', listener); return () => window.removeEventListener('admin-mfa-required', listener); }, []);
   if (emailCode) return <EmailCodeGate onReady={loadAccess} />;
-  if (mfa) return <MfaGate mode={mfa} onReady={loadAccess} />;
-  if (error) return <main className="min-h-screen grid place-items-center p-8"><div className="bg-white p-8 rounded-xl shadow max-w-md"><h1 className="text-xl font-bold mb-2">Acceso administrativo</h1><p>{error}</p><button className={`${button} mt-4`} onClick={() => adminRequest('/invitations/accept', { method: 'POST' }).then(() => adminRequest<AdminMe>('/me')).then(value => { setMe(value); setError(''); }).catch(e => setError(e.message))}>Aceptar invitación pendiente</button><Link to="/login" className="underline mt-4 block">Iniciar sesión con otra cuenta</Link></div></main>;
+  if (error) { navigate('/login', { replace: true }); return null; }
   if (!me) return <main className="p-8">Verificando acceso...</main>;
   const sub = pathname || '/';
   const permissions = new Set(me.permissions);
@@ -119,6 +116,7 @@ function EmailCodeGate({ onReady }: { onReady: () => void }) {
   </div></main>;
 }
 
+/* Legacy MFA gate removed: administrative access is validated only with an email code.
 function MfaGate({ mode, onReady }: { mode: 'setup' | 'verify'; onReady: () => void }) {
   const [secret, setSecret] = useState('');
   const [code, setCode] = useState('');
@@ -148,6 +146,7 @@ function MfaGate({ mode, onReady }: { mode: 'setup' | 'verify'; onReady: () => v
   </div></main>;
 }
 
+*/
 function Dashboard() {
   const { data, error, loading } = useData<{ pendingTransfers: number; approvedPayments: number; newUsers: number; unverifiedProfessionals: number; expiredPayments: number; unresolvedProviderPayments: number; rejectionRate: number | null; averageReviewHours: number | null; recentActivity: Array<{ id: string; action: string; createdAt: string }> }>('/dashboard');
   return <section><h1 className="text-3xl font-bold mb-6">Resumen</h1>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <>
@@ -168,7 +167,7 @@ function Payments({ transfers = false, permissions }: { transfers?: boolean; per
   const path = `/payments${transfers ? '/transfers' : ''}?page=${page}&${query}`;
   const { data, error, loading, reload } = useData<List<Payment>>(path);
   const exportCsv = async () => {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/admin/payments/export.csv?${query}${transfers ? '&method=transfer' : ''}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' } });
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/admin/payments/export.csv?${query}${transfers ? '&method=transfer' : ''}`, { headers: { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '' } });
     if (!response.ok) { alert('No se pudo exportar'); return; }
     const url = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = url; a.download = 'pagos.csv'; a.click(); URL.revokeObjectURL(url);
   };
@@ -242,7 +241,7 @@ function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }
 }
 
 function proofHeaders() {
-  return { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '', 'X-Admin-Session': sessionStorage.getItem('adminSession') || '' };
+  return { Authorization: `Bearer ${sessionStorage.getItem('authToken')}`, 'X-Admin-Email-Session': sessionStorage.getItem('adminEmailSession') || '' };
 }
 
 function PrivateProofPreview({ proofUrl, mimeType, onOpen }: { proofUrl: string; mimeType?: string; onOpen: () => void }) {

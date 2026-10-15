@@ -24,7 +24,6 @@ function getAuthState(): AuthState {
 
 function setAuthState(state: AuthState): void {
   if (state.isAuthenticated) {
-    sessionStorage.removeItem('adminSession');
     sessionStorage.removeItem('adminEmailSession');
   }
   sessionStorage.setItem(AUTH_KEY, JSON.stringify(state));
@@ -122,39 +121,6 @@ export async function register(data: { email: string; password: string; fullName
 }
 
 /**
- * Authenticates using a Google OAuth JWT credential.
- */
-export async function googleLogin(credential: string, role?: string): Promise<User> {
-  const defaultRole = role || sessionStorage.getItem('userType') || 'guest';
-  
-  const response = await fetch(`${API_URL}/auth/google`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ credential, role: defaultRole }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || 'Error en autenticación con Google');
-  }
-
-  const data = await response.json();
-  const user = data.user as User;
-  
-  setAuthState({
-    isAuthenticated: true,
-    userId: user.id,
-    role: user.role,
-    email: user.email,
-    token: data.token,
-  });
-
-  sessionStorage.setItem('cachedUser', JSON.stringify(user));
-
-  return user;
-}
-
-/**
  * Updates the user's role on the backend during onboarding.
  */
 export async function updateRole(role: 'client' | 'pro'): Promise<User> {
@@ -191,9 +157,7 @@ export async function updateRole(role: 'client' | 'pro'): Promise<User> {
   return user;
 }
 
-/**
- * Force injects auth state and emits the window event. Useful for VerifyEmail.
- */
+/** Force injects auth state after an authentication flow completes. */
 export function forceAuth(user: User, token: string): void {
   setAuthState({
     isAuthenticated: true,
@@ -211,7 +175,6 @@ export function forceAuth(user: User, token: string): void {
 export function logout(): void {
   setAuthState({ isAuthenticated: false, userId: null, role: UserRole.GUEST, email: null, token: null });
   sessionStorage.removeItem('cachedUser');
-  sessionStorage.removeItem('adminSession');
   sessionStorage.removeItem('adminEmailSession');
 }
 

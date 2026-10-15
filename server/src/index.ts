@@ -3,14 +3,11 @@ import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { OAuth2Client } from 'google-auth-library';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { adminRouter } from './admin';
-import { adminMfaRouter } from './adminMfaRouter';
 import { adminEmailCodeRouter } from './adminEmailCodeRouter';
-import { validateMfaConfig } from './adminMfa';
 import { transferRouter } from './transfers';
 import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl } from './payments';
 import { platformRouter } from './platform';
@@ -27,8 +24,6 @@ if (trustedProxyCidrs.length) app.set('trust proxy', trustedProxyCidrs);
 const port = process.env.PORT || 3000;
 if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) throw new Error('JWT_SECRET de al menos 32 caracteres requerido');
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-change-me';
-validateMfaConfig(JWT_SECRET);
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || 'dummy-google-client-id';
 
 // ---- PayPhone config ----
 const PAYPHONE_TOKEN = process.env.PAYPHONE_TOKEN || '';
@@ -38,8 +33,6 @@ const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5173';
 const adminHostnames = new Set((process.env.ADMIN_HOSTNAMES || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
 if (process.env.NODE_ENV === 'production' && !adminHostnames.size) throw new Error('ADMIN_HOSTNAMES es obligatorio en producción');
 const isAdminHost = (hostname: string) => !adminHostnames.size || adminHostnames.has(hostname.toLowerCase());
-
-const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -53,7 +46,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Session', 'X-Admin-Email-Session', 'Idempotency-Key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Admin-Email-Session', 'Idempotency-Key']
 }));
 app.use('/api/webhooks/kushki', kushkiWebhookRouter(prisma));
 app.use(express.json({ limit: '10mb' }));
@@ -105,8 +98,6 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-
     const result = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
@@ -115,8 +106,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
           fullName,
           role: finalRole,
           phone,
-          emailVerified: false,
-          verificationToken,
+          emailVerified: true,
           tenantId,
         },
       });
@@ -124,9 +114,10 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
       return newUser;
     });
 
-    const verificationLink = `${await publicBaseUrl(prisma, tenantId, req.hostname)}/verify?token=${verificationToken}`;
+    /* Email-link verification was removed.
+    const verificationLink = '';
     const safeName = fullName.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-    try {
+    if (false) try {
       await transporter.sendMail({
         from: `"ArtoCamello Cuentas" <${process.env.SMTP_USER}>`,
         to: email,
@@ -150,10 +141,15 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
       console.error('Error enviando correo de verificación:', emailErr);
     }
 
+    */
+    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = result;
+    const token = jwt.sign({ userId: result.id, role: result.role, email: result.email, sessionVersion: result.sessionVersion }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({
       success: true,
       message: 'Usuario registrado. Por favor verifica tu bandeja para activar la cuenta.',
-      requiresVerification: true,
+      requiresVerification: false,
+      user: userWithoutPassword,
+      token,
     });
   } catch (error) {
     console.error('Error in /register:', error);
@@ -182,11 +178,6 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
       if (!membership || !['active','invited'].includes(membership.status)) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
     }
 
-    if (!user.emailVerified) {
-      res.status(403).json({ error: 'Tu correo no ha sido verificado. Revisa tu bandeja de entrada o spam.' });
-      return;
-    }
-
     const isValid = await bcrypt.compare(password, user.password || '');
     if (!isValid) {
       res.status(401).json({ error: 'Credenciales inválidas' });
@@ -210,6 +201,7 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
 });
 
 // 3. Login y Registro vía Google
+/* Legacy Google and email-link verification endpoints are disabled.
 app.post('/api/auth/google', async (req: Request, res: Response): Promise<void> => {
   try {
     const { credential } = req.body || {};
@@ -342,6 +334,7 @@ app.get('/api/auth/verify', async (req: Request, res: Response): Promise<void> =
 // MIDDLEWARE DE AUTENTICACIÓN
 // ====================================================================
 
+*/
 export interface AuthRequest extends Request {
   user?: { userId: string; role: string; email: string; tenantId: string };
 }
@@ -362,7 +355,7 @@ const authenticateToken = (req: AuthRequest, res: Response, next: express.NextFu
     const claims = decoded as { userId?: string; sessionVersion?: number };
     if (!claims.userId) { res.status(403).json({ error: 'Token invalido' }); return; }
     prisma.user.findUnique({ where: { id: claims.userId } }).then(user => {
-      if (!user?.active || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión no disponible' }); return; }
+      if (!user?.active || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión no disponible' }); return; }
       tenantForHost(req.hostname).then(tenantId => {
         if (!tenantId || tenantId !== user.tenantId) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
         req.user = { userId: user.id, role: user.role, email: user.email, tenantId };
@@ -1394,8 +1387,8 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
 
     // 1. Verificar que el cliente esté verificado
     const client = await prisma.user.findUnique({ where: { id: clientId } });
-    if (!client || client.role !== 'client' || client.tenantId !== req.user!.tenantId || !client.emailVerified) {
-      res.status(403).json({ error: 'Solo un cliente verificado puede dejar reseñas.' });
+    if (!client || client.role !== 'client' || client.tenantId !== req.user!.tenantId) {
+      res.status(403).json({ error: 'Solo un cliente activo puede dejar reseñas.' });
       return;
     }
 
@@ -1571,7 +1564,6 @@ const adminHostGuard = (req: Request, res: Response, next: NextFunction) => {
   if (!isAdminHost(req.hostname)) { res.status(404).end(); return; }
   next();
 };
-app.use('/api/admin/mfa', adminHostGuard, adminMfaRouter(prisma, JWT_SECRET));
 app.use('/api/admin/access-code', adminHostGuard, adminEmailCodeRouter(prisma, JWT_SECRET));
 app.use('/api/admin', adminHostGuard, adminRouter(prisma, JWT_SECRET));
 app.use('/api/platform', platformRouter(prisma, JWT_SECRET));

@@ -22,7 +22,7 @@ export function transferRouter(db: PrismaClient, secret: string) {
     let claims: jwt.JwtPayload;
     try { claims = jwt.verify(token, secret) as jwt.JwtPayload; } catch { res.status(401).end(); return; }
     const user = typeof claims.userId === 'string' ? await db.user.findUnique({ where: { id: claims.userId } }) : null;
-    if (!user?.active || user.role !== 'pro' || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Perfil profesional o sesión no disponible' }); return; }
+    if (!user?.active || user.role !== 'pro' || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Perfil profesional o sesión no disponible' }); return; }
     const adminMembership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: user.tenantId, userId: user.id } }, select: { status: true } });
     if (adminMembership?.status === 'active') { res.status(403).json({ error: 'Las cuentas administrativas no realizan pagos' }); return; }
     const domain = await db.tenantDomain.findUnique({ where: { hostname: req.hostname.toLowerCase() } });
