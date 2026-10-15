@@ -26,12 +26,14 @@ import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDemo } from "./components/admin/AdminDemo";
 import { isAdminHost, isLocalAdminPreview } from './adminHost';
 import { isAdminDemoAvailable } from './adminPreview';
+import { MetaPixelPageViewTracker } from '@/shared/components/MetaPixelPageViewTracker';
 
 const publicRoutes = [
   {
     element: (
       <>
         <GlobalPreloader />
+        <MetaPixelPageViewTracker />
         <ScrollRestoration />
         <Outlet />
       </>

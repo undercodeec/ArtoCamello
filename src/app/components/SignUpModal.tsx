@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router';
 import image_fb32730281815c0feebcfe4031ae69e8b144e389 from 'figma:asset/fb32730281815c0feebcfe4031ae69e8b144e389.png';
 import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 interface SignUpModalProps {
   isOpen: boolean;
@@ -90,6 +91,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
           fullName: defaultName,
           role: UserRole.GUEST 
         });
+        trackMetaEvent('CompleteRegistration');
         
         if (result.requiresVerification) {
            setVerificationSent(true);

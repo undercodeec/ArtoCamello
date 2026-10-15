@@ -7,6 +7,7 @@ import { SignUpModal } from './SignUpModal';
 import { getProfessionalById, PublicProfessional, postReview, getPublicProfessionals } from '@/services/professionalService';
 import { toast } from 'sonner';
 import { getQuestionsForCategories } from '../constants/serviceQuestions';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 const FALLBACK_IMAGES = [
   "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwd29ya2luZ3xlbnwxfHx8fDE3NzQwMTI5NzV8MA&ixlib=rb-4.1.0&q=80&w=1080",
@@ -138,6 +139,16 @@ export function ProProfilePage() {
       setIsSubmittingReview(false);
     }
   };
+
+  useEffect(() => {
+    if (!pro) return;
+
+    trackMetaEvent('ViewContent', {
+      content_ids: [pro.id],
+      content_name: pro.profile?.businessName || pro.fullName,
+      content_type: 'service',
+    });
+  }, [pro]);
 
   const images = pro?.profile?.portfolioImages && pro.profile.portfolioImages.length > 0 ? pro.profile.portfolioImages : FALLBACK_IMAGES;
 

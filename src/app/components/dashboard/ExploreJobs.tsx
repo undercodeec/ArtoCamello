@@ -7,6 +7,7 @@ import { initiateLeadPayment, hasPurchasedLead } from '@/services/leadService';
 import { getCurrentAuth } from '@/services/authService';
 import { getCategoryBySlug, getAllCategories } from '@/services/categoryService';
 import { createCardIntent, getPaymentMethods } from '@/services/transferService';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 export function ExploreJobs() {
   const [filterCategory, setFilterCategory] = useState('');
@@ -51,6 +52,13 @@ export function ExploreJobs() {
       return;
     }
 
+    trackMetaEvent('InitiateCheckout', {
+      content_ids: [jobId],
+      content_type: 'service',
+      currency: 'USD',
+      value: result.costUSD,
+    });
+
     // Redirigir al profesional a PayPhone
     window.location.href = result.redirectUrl;
   };
@@ -60,6 +68,13 @@ export function ExploreJobs() {
     try {
       const result = await createCardIntent(jobId);
       if (!result.checkoutUrl) throw new Error('El checkout está en preparación. Intenta de nuevo en unos segundos.');
+      const job = jobs.find((item) => item.id === jobId);
+      trackMetaEvent('InitiateCheckout', {
+        content_ids: [jobId],
+        content_type: 'service',
+        currency: 'USD',
+        value: job?.costUSD ?? (job ? Math.max(job.estimatedBudget * 0.06, 3) : undefined),
+      });
       window.location.href = result.checkoutUrl;
     } catch (error) { setErrorMsg({ id: jobId, msg: (error as Error).message }); setLoadingPayment(null); }
   };

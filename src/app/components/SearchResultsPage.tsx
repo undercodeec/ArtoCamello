@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, MessageSquare, Heart, Star, User } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { getPublicProfessionals, PublicProfessional } from '@/services/professionalService';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 // Default images for fallback
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1622812947502-0a643f17387e?crop=entropy&cs=tinysrgb&fit=facearea&facepad=2&w=256&h=256&q=80";
@@ -16,6 +17,10 @@ export function SearchResultsPage() {
 
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    trackMetaEvent('Search', categoryFilter ? { search_string: categoryFilter } : undefined);
+  }, [categoryFilter]);
 
   useEffect(() => {
     getPublicProfessionals()

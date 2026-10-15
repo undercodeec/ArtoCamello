@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
 import { CheckCircle2, Loader2, Phone, Mail } from 'lucide-react';
 import { confirmLeadPayment } from '@/services/leadService';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 type Status = 'loading' | 'success' | 'error';
 
@@ -33,6 +34,14 @@ export function PaymentSuccess() {
       if (!mounted) return;
 
       if (result.success) {
+        const purchaseKey = `meta-pixel-purchase:${clientTxId}`;
+        if (!sessionStorage.getItem(purchaseKey)) {
+          trackMetaEvent('Purchase', {
+            currency: 'USD',
+            value: result.costUSD || 0,
+          });
+          sessionStorage.setItem(purchaseKey, '1');
+        }
         setContactPhone(result.contactPhone || '');
         setContactEmail(result.contactEmail || '');
         setCostUSD(result.costUSD || 0);

@@ -13,6 +13,7 @@ import { Quote } from '@/domain/types';
 import { getCurrentAuth } from '@/services/authService';
 import { getCategoryBySlug } from '@/services/categoryService';
 import { createCardIntent, getPaymentMethods } from '@/services/transferService';
+import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 type Tab = 'inbox' | 'unlocked';
 
@@ -426,6 +427,12 @@ export function MyContacts() {
       setPayingId(null);
       return;
     }
+    trackMetaEvent('InitiateCheckout', {
+      content_ids: [jobId],
+      content_type: 'service',
+      currency: 'USD',
+      value: result.costUSD,
+    });
     window.location.href = result.redirectUrl;
   };
   const handleCardPay = async (jobId: string) => {
@@ -433,6 +440,13 @@ export function MyContacts() {
     try {
       const result = await createCardIntent(jobId);
       if (!result.checkoutUrl) throw new Error('El checkout está en preparación. Intenta de nuevo en unos segundos.');
+      const job = inboxJobs.find((item) => item.id === jobId);
+      trackMetaEvent('InitiateCheckout', {
+        content_ids: [jobId],
+        content_type: 'service',
+        currency: 'USD',
+        value: job?.costUSD ?? (job ? Math.max(job.estimatedBudget * 0.06, 3) : undefined),
+      });
       window.location.href = result.checkoutUrl;
     } catch (error) { setPayError({ id: jobId, msg: (error as Error).message }); setPayingId(null); }
   };
