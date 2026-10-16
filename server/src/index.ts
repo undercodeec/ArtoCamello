@@ -1564,7 +1564,7 @@ const adminHostGuard = (req: Request, res: Response, next: NextFunction) => {
   if (!isAdminHost(req.hostname)) { res.status(404).end(); return; }
   next();
 };
-app.use('/api/admin/access-code', adminHostGuard, adminEmailCodeRouter(prisma, JWT_SECRET));
+app.use('/api/admin', adminHostGuard, adminEmailCodeRouter(prisma, JWT_SECRET));
 app.use('/api/admin', adminHostGuard, adminRouter(prisma, JWT_SECRET));
 app.use('/api/platform', platformRouter(prisma, JWT_SECRET));
 app.use('/api/payments', transferRouter(prisma, JWT_SECRET));
