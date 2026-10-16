@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router';
-import { trackMetaPageView } from '@/shared/lib/metaPixel';
+import { initializeMetaPixel, trackMetaPageView } from '@/shared/lib/metaPixel';
 
-/** Tracks SPA navigations while the HTML pixel handles the first page load. */
+/** Initializes and tracks Meta Pixel events only in the commercial application. */
 export function MetaPixelPageViewTracker() {
   const location = useLocation();
   const initialLocation = useRef(`${location.pathname}${location.search}`);
+
+  useEffect(() => {
+    if (initializeMetaPixel()) trackMetaPageView();
+  }, []);
 
   useEffect(() => {
     const currentLocation = `${location.pathname}${location.search}`;
