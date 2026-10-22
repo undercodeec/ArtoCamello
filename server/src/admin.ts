@@ -226,7 +226,22 @@ export function adminRouter(db: PrismaClient, secret: string) {
     res.setHeader('Content-Type', file.mimeType).setHeader('Cache-Control', 'private, no-store').send(content);
   }));
   router.get('/users', allow('users.read'), wrap(async (req, res) => {
-    const where: Prisma.UserWhereInput = { tenantId: req.admin!.tenantId, ...(req.query.role === 'client' || req.query.role === 'pro' ? { role: req.query.role } : {}), ...(typeof req.query.search === 'string' ? { OR: [{ fullName: { contains: req.query.search, mode: 'insensitive' } }, { email: { contains: req.query.search, mode: 'insensitive' } }] } : {}) };
+    const tenantId = req.admin!.tenantId;
+    const filters: Prisma.UserWhereInput[] = [{ tenantId }];
+    if (req.query.role === 'client') {
+      // Las cuentas se crean como guest y pasan a client al terminar el onboarding.
+      // Deben poder gestionarse desde Clientes aunque el usuario haya abandonado ese paso.
+      // Se excluyen las cuentas guest que ya son administradores activos.
+      filters.push({ OR: [
+        { role: 'client' },
+        { role: 'guest', memberships: { none: { tenantId, status: 'active' } } },
+      ] });
+    } else if (req.query.role === 'pro') {
+      filters.push({ role: 'pro' });
+    }
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) filters.push({ OR: [{ fullName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] });
+    const where: Prisma.UserWhereInput = { AND: filters };
     const [items, total] = await Promise.all([db.user.findMany({ where, ...page(req), orderBy: { createdAt: 'desc' }, select: { id: true, email: true, fullName: true, role: true, active: true, emailVerified: true, createdAt: true, professionalProfile: { select: { verified: true } }, _count: { select: { serviceRequests: true } } } }), db.user.count({ where })]);
     res.json({ items, total });
   }));

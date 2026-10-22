@@ -83,6 +83,13 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     const roleA = await db.adminRole.create({ data: { tenantId: tenantA, code: 'reviewer', name: 'Reviewer', permissions: { create: [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead].map(permission => ({ permissionId: permission.id })) } } });
     const roleB = await db.adminRole.create({ data: { tenantId: tenantB, code: 'reader', name: 'Reader', permissions: { create: [{ permissionId: read.id }] } } });
     await db.tenantMembership.createMany({ data: [{ tenantId: tenantA, userId: ids.a, roleId: roleA.id }, { tenantId: tenantB, userId: ids.b, roleId: roleB.id }] });
+    const adminEmailSession = jwt.sign({ userId: ids.a, tenantId: tenantA, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-email' });
+    const clientUsersResponse = await call('/api/admin/users?role=client', ids.a, 'GET', undefined, undefined, { 'X-Admin-Email-Session': adminEmailSession });
+    assert.equal(clientUsersResponse.status, 200);
+    const clientUsers = await clientUsersResponse.json();
+    assert.ok(clientUsers.items.some(user => user.id === ids.client));
+    assert.ok(clientUsers.items.some(user => user.id === ids.guest));
+    assert.ok(!clientUsers.items.some(user => user.id === ids.a));
     const clientRequestInput = { categorySlug: 'test', title: 'Unauthorized request', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private@example.test', estimatedBudget: 100 };
     assert.equal((await call('/api/requests', ids.a, 'POST', clientRequestInput)).status, 403);
     assert.equal((await call('/api/requests', ids.guest, 'POST', clientRequestInput)).status, 403);
