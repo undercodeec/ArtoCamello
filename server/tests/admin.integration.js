@@ -56,7 +56,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
   await new Promise(resolve => server.once('listening', resolve));
   const address = server.address();
   const base = `http://127.0.0.1:${address.port}`;
-  const token = userId => jwt.sign({ userId }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
+  const token = userId => jwt.sign({ userId }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-session' });
   const call = async (route, userId, method = 'GET', body, host, extraHeaders = {}) => new Promise((resolve, reject) => {
     const request = http.request(`${base}${route}`, { method, headers: { Host: host || (userId === ids.b ? hostB : hostA), Authorization: `Bearer ${token(userId)}`, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders } }, response => {
       const chunks = []; response.on('data', chunk => chunks.push(chunk)); response.on('end', () => { const raw = Buffer.concat(chunks).toString(); resolve({ status: response.statusCode, json: async () => JSON.parse(raw || '{}') }); });
@@ -402,7 +402,8 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     for (let attempt = 0; attempt < 8; attempt++) assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 401);
     assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 429);
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: 'bad', password: 'short', fullName: 'A' })).status, 400);
-    for (let attempt = 0; attempt < 20; attempt++) assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 400);
+    assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`.toUpperCase(), password: 'strong-test-password', fullName: 'Duplicate' })).status, 400);
+    for (let attempt = 0; attempt < 19; attempt++) assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 400);
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 429);
 
     const previousSmtpUser = process.env.SMTP_USER;
@@ -411,17 +412,23 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     delete process.env.SMTP_PASS;
     process.env.ADMIN_EMAIL_CODE_REQUIRED = 'true';
     try {
+      const adminPasswordToken = jwt.sign({ userId: ids.a, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-password', expiresIn: '10m' });
+      const passwordHeaders = { Authorization: `Bearer ${adminPasswordToken}` };
       const emailRequired = await call('/api/admin/me', ids.a);
       assert.equal(emailRequired.status, 403);
       assert.equal((await emailRequired.json()).code, 'EMAIL_CODE_REQUIRED');
-      assert.equal((await call('/api/admin/access-code/request', ids.a, 'POST', {})).status, 503);
+      assert.equal((await call('/api/admin/access-code/request', ids.a, 'POST', {}, hostA, passwordHeaders)).status, 503);
       const code = '123456';
       await db.adminAccessCode.create({ data: { tenantId: tenantA, userId: ids.a, codeHash: crypto.createHmac('sha256', process.env.JWT_SECRET || 'super-secret-jwt-key-change-me').update(`${ids.a}:${tenantA}:${code}`).digest('hex'), expiresAt: new Date(Date.now() + 60000) } });
-      assert.equal((await call('/api/admin/access-code/verify', ids.a, 'POST', { code: code === '000000' ? '000001' : '000000' })).status, 401);
-      const verifiedEmail = await call('/api/admin/access-code/verify', ids.a, 'POST', { code });
+      assert.equal((await call('/api/admin/access-code/verify', ids.a, 'POST', { code }, hostA, { Authorization: '' })).status, 401);
+      const publicToken = jwt.sign({ userId: ids.a, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
+      assert.equal((await call('/api/admin/access-code/verify', ids.a, 'POST', { code }, hostA, { Authorization: `Bearer ${publicToken}` })).status, 401);
+      assert.equal((await call('/api/admin/access-code/verify', ids.a, 'POST', { code: code === '000000' ? '000001' : '000000' }, hostA, passwordHeaders)).status, 401);
+      assert.equal((await db.adminAccessCode.findUniqueOrThrow({ where: { tenantId_userId: { tenantId: tenantA, userId: ids.a } } })).attempts, 1);
+      const verifiedEmail = await call('/api/admin/access-code/verify', ids.a, 'POST', { code }, hostA, passwordHeaders);
       assert.equal(verifiedEmail.status, 200);
-      const { adminEmailSession } = await verifiedEmail.json();
-      assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Email-Session': adminEmailSession })).status, 200);
+      const { adminEmailSession, token: fullAdminToken } = await verifiedEmail.json();
+      assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { Authorization: `Bearer ${fullAdminToken}`, 'X-Admin-Email-Session': adminEmailSession })).status, 200);
     } finally {
       if (previousSmtpUser === undefined) delete process.env.SMTP_USER; else process.env.SMTP_USER = previousSmtpUser;
       if (previousSmtpPass === undefined) delete process.env.SMTP_PASS; else process.env.SMTP_PASS = previousSmtpPass;

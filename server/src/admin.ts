@@ -5,7 +5,7 @@ import { allocateLead, PaymentConflict, settingsOf } from './payments';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
-import nodemailer from 'nodemailer';
+import { createSmtpTransport, smtpFrom } from './mail';
 import { verifyAdminEmailSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 
@@ -78,7 +78,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const token = /^Bearer (.+)$/.exec(req.header('authorization') || '')?.[1];
     if (!token) { res.status(401).json({ error: 'Sesión requerida' }); return; }
     let claims: jwt.JwtPayload;
-    try { claims = jwt.verify(token, secret) as jwt.JwtPayload; }
+    try { claims = jwt.verify(token, secret, { audience: ['admin-password', 'admin-session'] }) as jwt.JwtPayload; }
     catch { res.status(401).json({ error: 'Sesión inválida' }); return; }
     if (typeof claims.userId !== 'string') { res.status(401).json({ error: 'Sesión inválida' }); return; }
     const user = await db.user.findUnique({ where: { id: claims.userId } });
@@ -89,7 +89,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (!tenantId) { res.status(404).end(); return; }
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId: user.id } }, include: { role: { include: { permissions: { include: { permission: true } } } } } });
     if (!membership || membership.status !== 'active' || membership.role.tenantId !== tenantId) { res.status(403).json({ error: 'Sin membresía activa en este tenant' }); return; }
-    if (!verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma el código enviado a tu correo para acceder al panel', code: 'EMAIL_CODE_REQUIRED' }); return; }
+    if (claims.aud !== 'admin-session' || !verifyAdminEmailSession(req.header('x-admin-email-session'), user.id, tenantId, user.sessionVersion, secret)) { res.status(403).json({ error: 'Confirma el código enviado a tu correo para acceder al panel', code: 'EMAIL_CODE_REQUIRED' }); return; }
     req.admin = { tenantId, actorId: user.id, role: membership.role.code, permissions: new Set(membership.role.permissions.map(p => p.permission.code)) };
     next();
   })().catch(next); });
@@ -295,8 +295,8 @@ export function adminRouter(db: PrismaClient, secret: string) {
     let delivered = false;
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
-        const mail = nodemailer.createTransport({ service: 'gmail', auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-        await mail.sendMail({ from: process.env.SMTP_USER, to: email, subject: 'Acceso al panel ArtoCamello', text: `Tu acceso administrativo está listo. Ingresa con un código enviado a tu correo: ${invitationBase}/login` });
+        const mail = createSmtpTransport();
+        await mail.sendMail({ from: smtpFrom(), to: email, subject: 'Acceso al panel ArtoCamello', text: `Tu acceso administrativo está listo. Ingresa con un código enviado a tu correo: ${invitationBase}/login` });
         delivered = true;
       } catch (error) { console.error('Invitation email failed', error); }
     }

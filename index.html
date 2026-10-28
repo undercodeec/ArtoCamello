@@ -7,19 +7,17 @@
       <title>ArtoCamello — Encuentra profesionales de confianza</title>
       <link rel="icon" type="image/x-icon" href="src/assets/logoartocamello.ico">
     
-      <!-- Google tag (gtag.js) -->
-      <script async src="https://www.googletagmanager.com/gtag/js?id=G-F09DXFPCFC"></script>
+      <!-- Analytics run only on the commercial site. -->
       <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-
-        gtag('config', 'G-F09DXFPCFC');
-      </script>
-
-      <!-- Meta Pixel Code: enabled only for the commercial site. -->
-      <script>
-        if (!['admin.artocamello.com', 'admin.localhost'].includes(window.location.hostname)) {
+        if (!['admin.artocamello.com', 'admin.localhost'].includes(window.location.hostname) && !window.location.pathname.startsWith('/admin')) {
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'G-F09DXFPCFC');
+          const analytics = document.createElement('script');
+          analytics.async = true;
+          analytics.src = 'https://www.googletagmanager.com/gtag/js?id=G-F09DXFPCFC';
+          document.head.appendChild(analytics);
           !function(f,b,e,v,n,t,s)
           {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
           n.callMethod.apply(n,arguments):n.queue.push(arguments)};

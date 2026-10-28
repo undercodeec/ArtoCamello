@@ -79,6 +79,28 @@ export async function login(email: string, password: string): Promise<User> {
   return user;
 }
 
+export async function requestPasswordReset(email: string): Promise<string> {
+  const response = await fetch(`${API_URL}/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo solicitar el enlace.');
+  return data.message;
+}
+
+export async function resetPassword(token: string, password: string): Promise<string> {
+  const response = await fetch(`${API_URL}/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo restablecer la contraseña.');
+  return data.message;
+}
+
 /**
  * Register a new user. Support verification flow.
  */

@@ -3,7 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { adminRequest, AdminMe, Payment } from '@/services/adminService';
 import logo from '@/assets/logoartocamello.png';
 import { adminUrl, publicAppUrl } from '@/app/adminHost';
-import { getCurrentUser, logout } from '@/services/authService';
+import { forceAuth, getCurrentUser, logout } from '@/services/authService';
+import { User } from '@/domain/types';
 import { Bell, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings2, ShieldCheck, Users as UsersIcon, UserRound, X } from 'lucide-react';
 
 type List<T> = { items: T[]; total: number };
@@ -88,6 +89,7 @@ export function AdminPanel() {
 }
 
 function EmailCodeGate({ onReady }: { onReady: () => void }) {
+  const navigate = useNavigate();
   const [code, setCode] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -100,7 +102,8 @@ function EmailCodeGate({ onReady }: { onReady: () => void }) {
   const verify = async () => {
     setBusy(true); setError('');
     try {
-      const response = await adminRequest<{ adminEmailSession: string }>('/access-code/verify', { method: 'POST', body: JSON.stringify({ code }) });
+      const response = await adminRequest<{ user: User; token: string; adminEmailSession: string }>('/access-code/verify', { method: 'POST', body: JSON.stringify({ code }) });
+      forceAuth(response.user, response.token);
       sessionStorage.setItem('adminEmailSession', response.adminEmailSession);
       onReady();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
@@ -111,6 +114,7 @@ function EmailCodeGate({ onReady }: { onReady: () => void }) {
     <button className={button} disabled={busy} onClick={send}>{message ? 'Reenviar código' : 'Enviar código'}</button>
     <label className="block text-sm">Código de seis dígitos<input className={`${input} block w-full mt-1`} autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code} onChange={event => setCode(event.target.value.replace(/\D/g, ''))} /></label>
     <button className={button} disabled={busy || code.length !== 6} onClick={verify}>Continuar</button>
+    <button type="button" className="text-sm underline text-gray-700" onClick={() => navigate('/login', { replace: true })}>Volver a iniciar sesión</button>
     {message && <p className="text-green-700">{message}</p>}
     {error && <p className="text-red-700">{error}</p>}
   </div></main>;

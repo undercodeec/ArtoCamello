@@ -117,6 +117,7 @@ src/
 | `/pro` | Público | Landing profesional |
 | `/mis-solicitudes` | Cliente | Mis solicitudes con comparación de presupuestos |
 | `/mi-perfil` | Cliente | Perfil del cliente |
+| `/recuperar-contrasena` | Público | Restablecer contraseña de cliente mediante enlace temporal |
 | `/onboarding` | Público | Onboarding profesional |
 | `/dashboard` | Profesional | Resumen del negocio |
 | `/dashboard/jobs` | Profesional | Explorar y desbloquear trabajos |
@@ -138,6 +139,12 @@ El panel está en `https://admin.artocamello.com`; el sitio público no publica 
 Para producción, cree el DNS de `admin.artocamello.com` hacia el frontend, incluya ese host en `ADMIN_HOSTNAMES=admin.artocamello.com` y `ADMIN_APP_BASE_URL=https://admin.artocamello.com` en el API, y emita su certificado TLS. El mismo host debe existir en `TenantDomain` para resolver el tenant; el `seed` ya lo registra para ArtoCamello. Configure `VITE_ADMIN_URL` y `VITE_PUBLIC_APP_URL` antes de construir el frontend. En local puede usar `http://admin.localhost:5173` con `VITE_ADMIN_URL` y `ADMIN_APP_BASE_URL`, y ejecutar el API sin `ADMIN_HOSTNAMES`.
 
 Consulta [ADMIN_OPERACION.md](ADMIN_OPERACION.md) para migraciones, roles, cuenta inicial, configuración bancaria y conciliación. La integración provisional de tarjeta con Kushki y sus requisitos de activación están en [server/docs/CARD_PROVIDER.md](server/docs/CARD_PROVIDER.md). Los pasos pendientes antes de producción están en [server/docs/PRODUCTION_CHECKLIST.md](server/docs/PRODUCTION_CHECKLIST.md).
+
+## Recuperación de contraseña de clientes
+
+Antes de publicar esta función, aplica la migración Prisma `20261026000000_client_password_reset` en la base de datos de la API. El correo usa `SMTP_USER` y `SMTP_PASS` del entorno del servidor. Para un SMTP propio configura también `SMTP_HOST`, `SMTP_PORT` (por ejemplo `465`) y, si hace falta, `SMTP_SECURE=true`; `SMTP_FROM` es opcional. Sin `SMTP_HOST`, se conserva el transporte Gmail anterior. `APP_BASE_URL` debe apuntar al sitio público HTTPS para construir el enlace de recuperación.
+
+La solicitud acepta únicamente cuentas activas con rol `client` y contraseña local. El enlace vence en 30 minutos, se usa una sola vez y cambiar la contraseña invalida las sesiones anteriores. El sitio administrativo mantiene su flujo de acceso independiente.
 
 ## Otros pendientes
 

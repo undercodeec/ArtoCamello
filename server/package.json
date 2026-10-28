@@ -15,7 +15,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:reconcile": "ts-node prisma/reconcile.ts",
-    "test:integration": "pnpm run build && node --test tests/admin.integration.js"
+    "test:integration": "pnpm run build && node --test tests/admin.integration.js tests/password-reset.integration.js",
+    "test:security-unit": "pnpm run build && node --test tests/admin-code-guard.unit.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",
@@ -24,7 +25,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "10.0.9"
+    "nodemailer": "10.1.4"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

@@ -3,7 +3,7 @@ import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import nodemailer from 'nodemailer';
+import { createSmtpTransport, smtpFrom } from './mail';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { adminRouter } from './admin';
@@ -55,13 +55,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // ====================================================================
 // CONFIGURACIÓN DE CORREO (NODEMAILER)
 // ====================================================================
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const transporter = createSmtpTransport();
 
 // ====================================================================
 // HELPERS
@@ -83,6 +77,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
   try {
     const { email, password, fullName, phone } = req.body || {};
     if (typeof email !== 'string' || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || typeof password !== 'string' || password.length < 8 || password.length > 128 || typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.length > 100 || (phone !== undefined && (typeof phone !== 'string' || phone.length > 30))) { res.status(400).json({ error: 'Datos de registro inválidos' }); return; }
+    const normalizedEmail = email.trim().toLowerCase();
     const tenantId = await tenantForHost(req.hostname);
     if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -90,7 +85,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
     if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos de registro' }); return; }
     const finalRole = 'guest'; // Siempre forzar guest al inicio
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
     if (existingUser) {
       res.status(400).json({ error: 'El correo electrónico ya está en uso' });
       return;
@@ -101,7 +96,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
     const result = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
-          email,
+          email: normalizedEmail,
           password: hashedPassword,
           fullName,
           role: finalRole,
@@ -146,7 +141,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
     const token = jwt.sign({ userId: result.id, role: result.role, email: result.email, sessionVersion: result.sessionVersion }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({
       success: true,
-      message: 'Usuario registrado. Por favor verifica tu bandeja para activar la cuenta.',
+      message: 'Usuario registrado correctamente.',
       requiresVerification: false,
       user: userWithoutPassword,
       token,
@@ -168,7 +163,9 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
     const ipLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['login-ip', loginTenantId, ip], 80, 15 * 60000);
     const accountLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['login-account-ip', loginTenantId, ip, email.trim().toLowerCase()], 8, 15 * 60000);
     if (!ipLimit.allowed || !accountLimit.allowed) { res.setHeader('Retry-After', String(Math.max(ipLimit.retryAfterSeconds, accountLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiados intentos. Espera antes de volver a iniciar sesión' }); return; }
-    const user = await prisma.user.findUnique({ where: { email } });
+    const submittedEmail = email.trim();
+    const user = await prisma.user.findUnique({ where: { email: submittedEmail } })
+      || await prisma.user.findUnique({ where: { email: submittedEmail.toLowerCase() } });
     if (!user || !user.active) {
       res.status(401).json({ error: 'Credenciales inválidas' });
       return;
@@ -197,6 +194,89 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
   } catch (error) {
     console.error('Error in /login:', error);
     res.status(500).json({ error: 'Hubo un error en el servidor al intentar iniciar sesión' });
+  }
+});
+
+// La respuesta de solicitud es la misma para correos inexistentes y roles no elegibles.
+const resetRequestMessage = 'Si existe una cuenta cliente activa con ese correo, recibirás un enlace para restablecer tu contraseña.';
+const resetTokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+
+app.post('/api/auth/forgot-password', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const email = req.body?.email;
+    if (typeof email !== 'string' || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
+      res.status(400).json({ error: 'Ingresa un correo electrónico válido.' }); return;
+    }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId || isAdminHost(req.hostname) && adminHostnames.size) { res.status(403).json({ error: 'Sitio no disponible.' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const normalizedEmail = email.trim().toLowerCase();
+    const [ipLimit, accountLimit] = await Promise.all([
+      consumeAuthAttempt(prisma, JWT_SECRET, ['reset-ip', tenantId, ip], 20, 60 * 60000),
+      consumeAuthAttempt(prisma, JWT_SECRET, ['reset-account', tenantId, normalizedEmail], 3, 60 * 60000),
+    ]);
+    if (!ipLimit.allowed || !accountLimit.allowed) {
+      res.setHeader('Retry-After', String(Math.max(ipLimit.retryAfterSeconds, accountLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiados intentos. Espera antes de solicitar otro enlace.' }); return;
+    }
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) { res.status(503).json({ error: 'El envío de correo no está disponible temporalmente.' }); return; }
+
+    const user = await prisma.user.findFirst({ where: { tenantId, email: { equals: email.trim(), mode: 'insensitive' }, role: 'client', active: true, authProvider: 'local', password: { not: null } } });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      await prisma.passwordResetToken.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, tokenHash: resetTokenHash(token), expiresAt },
+        update: { tokenHash: resetTokenHash(token), expiresAt },
+      });
+      const resetUrl = new URL('/recuperar-contrasena', APP_BASE_URL);
+      resetUrl.hash = new URLSearchParams({ token }).toString();
+      try {
+        await transporter.sendMail({
+          from: `"ArtoCamello Cuentas" <${smtpFrom()}>`,
+          to: user.email,
+          subject: 'Restablece tu contraseña de ArtoCamello',
+          text: `Solicitaste cambiar la contraseña de tu cuenta cliente. Abre este enlace para continuar:\n${resetUrl.toString()}\n\nEl enlace vence en 30 minutos y solo puede usarse una vez. Si no solicitaste el cambio, ignora este mensaje.`,
+        });
+      } catch (mailError) {
+        await prisma.passwordResetToken.deleteMany({ where: { userId: user.id, tokenHash: resetTokenHash(token) } });
+        console.error('Error enviando recuperación de contraseña:', mailError);
+      }
+    }
+    res.json({ message: resetRequestMessage });
+  } catch (error) {
+    console.error('Error in /forgot-password:', error);
+    res.status(500).json({ error: 'No se pudo procesar la solicitud.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { token, password } = req.body || {};
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token) || typeof password !== 'string' || password.length < 8 || password.length > 128) {
+      res.status(400).json({ error: 'Enlace o contraseña inválidos. La contraseña debe tener entre 8 y 128 caracteres.' }); return;
+    }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId || isAdminHost(req.hostname) && adminHostnames.size) { res.status(403).json({ error: 'Sitio no disponible.' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['reset-use-ip', tenantId, ip], 30, 15 * 60000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos. Espera antes de volver a intentar.' }); return; }
+
+    const tokenHash = resetTokenHash(token);
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const changed = await prisma.$transaction(async tx => {
+      const record = await tx.passwordResetToken.findUnique({ where: { tokenHash }, include: { user: true } });
+      if (!record || record.expiresAt <= new Date() || record.user.tenantId !== tenantId || record.user.role !== 'client' || !record.user.active || record.user.authProvider !== 'local' || !record.user.password) return false;
+      const consumed = await tx.passwordResetToken.deleteMany({ where: { id: record.id, tokenHash, expiresAt: { gt: new Date() } } });
+      if (consumed.count !== 1) return false;
+      await tx.user.update({ where: { id: record.userId }, data: { password: hashedPassword, sessionVersion: { increment: 1 } } });
+      return true;
+    });
+    if (!changed) { res.status(400).json({ error: 'El enlace no es válido o ya venció. Solicita uno nuevo.' }); return; }
+    res.json({ message: 'Contraseña actualizada. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    console.error('Error in /reset-password:', error);
+    res.status(500).json({ error: 'No se pudo restablecer la contraseña.' });
   }
 });
 
@@ -1573,6 +1653,9 @@ if (require.main === module) {
   app.listen(port, () => console.log(`Backend Server running at http://localhost:${port}`));
   const expiryTimer = setInterval(() => expirePendingPayments(prisma).catch(error => console.error('Payment expiry failed', error)), 60000);
   expiryTimer.unref();
-  const throttleCleanupTimer = setInterval(() => pruneAuthAttempts(prisma).catch(error => console.error('Auth throttle cleanup failed', error)), 3600000);
+  const throttleCleanupTimer = setInterval(() => Promise.all([
+    pruneAuthAttempts(prisma),
+    prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: new Date() } } }),
+  ]).catch(error => console.error('Auth cleanup failed', error)), 3600000);
   throttleCleanupTimer.unref();
 }

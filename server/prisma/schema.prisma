@@ -60,12 +60,24 @@ model User {
   reviewsReceived    Review[]             @relation("ProfessionalReviews")
   memberships        TenantMembership[]
   adminAccessCodes   AdminAccessCode[]
+  passwordResetToken PasswordResetToken?
   payments           Payment[]
   auditActions       AuditLog[]
   submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
   reviewedTransfers  TransferSubmission[] @relation("TransferReviewer")
 
   @@index([tenantId, role, createdAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique @db.VarChar(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 model ClientProfile {

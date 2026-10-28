@@ -9,7 +9,7 @@ export function platformRouter(db: PrismaClient, secret: string) {
   router.use((req: Request, res: Response, next: NextFunction) => { (async () => {
     const token = /^Bearer (.+)$/.exec(req.header('authorization') || '')?.[1];
     let claims: jwt.JwtPayload;
-    try { claims = jwt.verify(token || '', secret) as jwt.JwtPayload; } catch { res.status(401).end(); return; }
+    try { claims = jwt.verify(token || '', secret, { audience: 'admin-session' }) as jwt.JwtPayload; } catch { res.status(401).end(); return; }
     const user = typeof claims.userId === 'string' ? await db.user.findUnique({ where: { id: claims.userId } }) : null;
     if (!user?.active || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).end(); return; }
     const membership = await db.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId: 'artocamello', userId: user.id } }, include: { role: { include: { permissions: { include: { permission: true } } } } } });

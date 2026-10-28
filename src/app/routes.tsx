@@ -10,6 +10,7 @@ import { MyRequestsPage } from "./components/MyRequestsPage";
 import { ClientProfilePage } from "./components/ClientProfilePage";
 import { PaymentSuccess } from "./pages/PaymentSuccess";
 import { PaymentFailed } from "./pages/PaymentFailed";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { RouteGuard } from "@/shared/components/RouteGuard";
 import { UserRole } from "@/domain/types";
 
@@ -47,6 +48,7 @@ const publicRoutes = [
           { path: "pro", Component: ProPage },
           { path: "search", Component: SearchResultsPage },
           { path: "profile/:id", Component: ProProfilePage },
+          { path: "recuperar-contrasena", Component: ResetPasswordPage },
           {
             path: "mis-solicitudes",
             element: (
