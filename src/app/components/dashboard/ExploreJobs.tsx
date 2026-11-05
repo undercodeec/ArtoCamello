@@ -13,6 +13,7 @@ export function ExploreJobs() {
   const [filterCategory, setFilterCategory] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [jobs, setJobs] = useState<ServiceRequest[]>([]);
+  const [jobsError, setJobsError] = useState('');
   const [purchasedSet, setPurchasedSet] = useState<Set<string>>(new Set());
   const [loadingPayment, setLoadingPayment] = useState<string | null>(null);
   const [transferAvailable, setTransferAvailable] = useState(false);
@@ -29,15 +30,19 @@ export function ExploreJobs() {
 
   const loadJobs = async () => {
     if (!auth.userId) return;
-    const available = await listMatchingRequestsForProfessional(auth.userId);
-    setJobs(available);
-    // Cargar cuáles ya fueron comprados para marcar el botón
-    const purchased = new Set<string>();
-    for (const job of available) {
-      const already = await hasPurchasedLead(job.id, auth.userId);
-      if (already) purchased.add(job.id);
+    setJobsError('');
+    try {
+      const available = await listMatchingRequestsForProfessional(auth.userId);
+      setJobs(available);
+      const purchased = new Set<string>();
+      for (const job of available) {
+        const already = await hasPurchasedLead(job.id, auth.userId);
+        if (already) purchased.add(job.id);
+      }
+      setPurchasedSet(purchased);
+    } catch (cause) {
+      setJobsError(cause instanceof Error ? cause.message : 'No se pudieron cargar los trabajos.');
     }
-    setPurchasedSet(purchased);
   };
 
   const handleUnlock = async (jobId: string) => {
@@ -150,6 +155,7 @@ export function ExploreJobs() {
       </div>
 
       {/* Jobs List */}
+      {jobsError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{jobsError} <button type="button" onClick={loadJobs} className="ml-2 font-semibold underline">Reintentar</button></div>}
       {filteredJobs.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
@@ -274,6 +280,7 @@ export function ExploreJobs() {
                       )}
                     </button>}{cardAvailable && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg disabled:opacity-50" onClick={() => handleCardUnlock(job.id)}>Pagar con tarjeta</button>}{transferAvailable && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}`; }}>Pagar por transferencia</button>}{!payphoneAvailable && !transferAvailable && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
                   )}
+                  {transferAvailable && !already && <p className="mt-3 text-xs text-gray-600">El número del cliente se habilitará después de validar el pago.</p>}
                 </div>
               </div>
             );

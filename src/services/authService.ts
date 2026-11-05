@@ -14,6 +14,29 @@ export interface AuthState {
   token: string | null;
 }
 
+type ApiMessage = {
+  error?: unknown;
+  message?: unknown;
+};
+
+/**
+ * The API is expected to return JSON. A missing route or reverse proxy can
+ * return HTML, which must not surface as a JSON SyntaxError in the UI.
+ */
+async function readApiMessage(response: Response): Promise<ApiMessage> {
+  const body = await response.text();
+  if (!body) return {};
+
+  try {
+    return JSON.parse(body) as ApiMessage;
+  } catch {
+    if (!response.ok) {
+      throw new Error('El servicio de recuperación no está disponible en este momento. Intenta nuevamente más tarde.');
+    }
+    throw new Error('El servidor devolvió una respuesta inválida. Intenta nuevamente más tarde.');
+  }
+}
+
 function getAuthState(): AuthState {
   try {
     const raw = sessionStorage.getItem(AUTH_KEY);
@@ -82,23 +105,23 @@ export async function login(email: string, password: string): Promise<User> {
 export async function requestPasswordReset(email: string): Promise<string> {
   const response = await fetch(`${API_URL}/auth/forgot-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ email }),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'No se pudo solicitar el enlace.');
-  return data.message;
+  const data = await readApiMessage(response);
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'No se pudo solicitar el enlace.');
+  return typeof data.message === 'string' ? data.message : 'Revisa tu correo para continuar.';
 }
 
 export async function resetPassword(token: string, password: string): Promise<string> {
   const response = await fetch(`${API_URL}/auth/reset-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ token, password }),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'No se pudo restablecer la contraseña.');
-  return data.message;
+  const data = await readApiMessage(response);
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'No se pudo restablecer la contraseña.');
+  return typeof data.message === 'string' ? data.message : 'Contraseña actualizada.';
 }
 
 /**

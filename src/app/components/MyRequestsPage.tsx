@@ -13,6 +13,8 @@ import { getCurrentAuth } from '@/services/authService';
 
 export function MyRequestsPage() {
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [cancelModalOpen, setCancelModalOpen] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [quotesMap, setQuotesMap] = useState<Record<string, Awaited<ReturnType<typeof listQuotesByRequest>>>>({});
@@ -24,6 +26,8 @@ export function MyRequestsPage() {
   }, []);
 
   const loadRequests = async () => {
+    setLoadingRequests(true);
+    setLoadError('');
     if (auth.userId) {
       try {
         const reqs = await listRequestsByClient(auth.userId);
@@ -45,8 +49,10 @@ export function MyRequestsPage() {
         setQuotesMap(qMap);
       } catch (error) {
         console.error("Failed to load requests:", error);
+        setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar tus solicitudes.');
       }
     }
+    setLoadingRequests(false);
   };
 
   const handleCancelRequest = async (id: string) => {
@@ -100,7 +106,14 @@ export function MyRequestsPage() {
           </Link>
         </div>
 
-        {requests.length === 0 ? (
+        {loadingRequests ? (
+          <div role="status" className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-600">Cargando tus solicitudes...</div>
+        ) : loadError ? (
+          <div role="alert" className="bg-white rounded-xl border border-red-200 p-8 text-center">
+            <p className="mb-4 text-red-700">{loadError}</p>
+            <button type="button" onClick={loadRequests} className="rounded-lg bg-[#101828] px-5 py-2 font-semibold text-white">Reintentar</button>
+          </div>
+        ) : requests.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
             <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-[#101828] mb-2">Aún no tienes solicitudes</h3>

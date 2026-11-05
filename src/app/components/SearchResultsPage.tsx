@@ -3,6 +3,7 @@ import { ChevronDown, MessageSquare, Heart, Star, User } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { getPublicProfessionals, PublicProfessional } from '@/services/professionalService';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
+import { matchesProfessionalSearch, matchesServiceCategory } from '@/app/constants/serviceSearch';
 
 // Default images for fallback
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1622812947502-0a643f17387e?crop=entropy&cs=tinysrgb&fit=facearea&facepad=2&w=256&h=256&q=80";
@@ -14,32 +15,37 @@ export function SearchResultsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const categoryFilter = searchParams.get('c');
+  const searchQuery = searchParams.get('q');
 
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    trackMetaEvent('Search', categoryFilter ? { search_string: categoryFilter } : undefined);
-  }, [categoryFilter]);
+    const term = searchQuery || categoryFilter;
+    trackMetaEvent('Search', term ? { search_string: term } : undefined);
+  }, [categoryFilter, searchQuery]);
 
   useEffect(() => {
     getPublicProfessionals()
       .then(data => {
         setProfessionals(data);
+        setLoadError(false);
         setLoading(false);
       })
       .catch(err => {
         console.error("Error fetching professionals:", err);
+        setLoadError(true);
         setLoading(false);
       });
   }, []);
 
   const filteredProfessionals = React.useMemo(() => {
-    if (!categoryFilter) return professionals;
-    return professionals.filter(pro => 
-      pro.profile?.categories?.includes(categoryFilter)
+    return professionals.filter(pro =>
+      (!categoryFilter || matchesServiceCategory(pro.profile?.categories || [], categoryFilter)) &&
+      (!searchQuery || matchesProfessionalSearch(pro, searchQuery))
     );
-  }, [professionals, categoryFilter]);
+  }, [professionals, categoryFilter, searchQuery]);
 
   return (
     <div className="w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-4">
@@ -49,7 +55,7 @@ export function SearchResultsPage() {
       {/* Results Header */}
       <div className="flex justify-between items-center mb-6">
         <p className="text-[#62646A] text-sm font-medium">
-          {loading ? "Buscando..." : `${filteredProfessionals.length} resultados`}
+          {loading ? "Buscando..." : loadError ? 'No se pudieron cargar los resultados' : `${filteredProfessionals.length} resultados`}
         </p>
         <div className="flex items-center text-sm font-medium text-[#62646A] cursor-pointer">
           <span className="mr-1">Ordenar por:</span>
@@ -74,9 +80,13 @@ export function SearchResultsPage() {
           <div className="flex justify-center py-20">
             <div className="w-10 h-10 border-4 border-gray-200 border-t-[#FFCA0C] rounded-full animate-spin"></div>
           </div>
+        ) : loadError ? (
+          <div className="text-center py-12" role="alert">
+            <p className="text-gray-500 font-medium">No se pudieron cargar los profesionales. Intenta de nuevo más tarde.</p>
+          </div>
         ) : filteredProfessionals.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-500 font-medium">No se encontraron profesionales de esta categoría.</p>
+            <p className="text-gray-500 font-medium">No se encontraron profesionales para esta búsqueda.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">

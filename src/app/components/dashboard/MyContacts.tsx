@@ -12,7 +12,7 @@ import { submitQuote, listQuotesByProfessional } from '@/services/quoteService';
 import { Quote } from '@/domain/types';
 import { getCurrentAuth } from '@/services/authService';
 import { getCategoryBySlug } from '@/services/categoryService';
-import { createCardIntent, getPaymentMethods } from '@/services/transferService';
+import { createCardIntent, getPaymentMethods, listMyTransfers, type TransferPayment } from '@/services/transferService';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
 
 type Tab = 'inbox' | 'unlocked';
@@ -46,11 +46,12 @@ interface InboxCardProps {
   onPay: (id: string) => void;
   onCard: (id: string) => void;
   transferAvailable: boolean;
+  transferPayment?: TransferPayment;
   payphoneAvailable: boolean;
   cardAvailable: boolean;
 }
 
-function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, payphoneAvailable, cardAvailable }: InboxCardProps) {
+function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, transferPayment, payphoneAvailable, cardAvailable }: InboxCardProps) {
   const category = getCategoryBySlug(job.categorySlug);
   const costUSD = job.costUSD ?? Math.max(job.estimatedBudget * 0.06, 3);
   const maxProfessionals = job.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
@@ -156,7 +157,7 @@ function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, pa
             Cupos agotados — No disponible
           </div>
         ) : (
-          <div className="grid gap-2">{payphoneAvailable && <button
+          <div className="grid gap-2">{payphoneAvailable && !transferPayment && <button
             onClick={() => onPay(job.id)}
             disabled={isLoading}
             id={`btn-pay-lead-${job.id}`}
@@ -180,8 +181,9 @@ function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, pa
                 Ver datos del cliente — ${costUSD.toFixed(2)} USD
               </>
             )}
-          </button>}{cardAvailable && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl disabled:opacity-50" onClick={() => onCard(job.id)}>Pagar con tarjeta</button>}{transferAvailable && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}`; }}>Pagar por transferencia</button>}{!payphoneAvailable && !transferAvailable && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
+          </button>}{cardAvailable && !transferPayment && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl disabled:opacity-50" onClick={() => onCard(job.id)}>Pagar con tarjeta</button>}{(transferAvailable || transferPayment) && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-xl" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}${transferPayment ? `?paymentId=${transferPayment.id}` : ''}`; }}>{transferPayment?.status === 'under_review' ? 'Comprobante en revisión · Ver estado' : transferPayment?.status === 'awaiting_transfer' ? 'Continuar transferencia' : transferPayment?.status === 'rejected' ? 'Reenviar comprobante' : 'Pagar por transferencia'}</button>}{!payphoneAvailable && !transferAvailable && !transferPayment && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
         )}
+        {(transferAvailable || transferPayment) && <p className="mt-3 text-xs leading-relaxed text-gray-600">El número del cliente se habilitará únicamente después de validar el pago.</p>}
       </div>
     </div>
   );
@@ -370,7 +372,9 @@ export function MyContacts() {
 
   // Inbox (pending leads to pay)
   const [inboxJobs, setInboxJobs] = useState<ServiceRequest[]>([]);
+  const [transferPayments, setTransferPayments] = useState<Record<string, TransferPayment>>({});
   const [inboxLoading, setInboxLoading] = useState(true);
+  const [inboxError, setInboxError] = useState('');
   const [payingId, setPayingId] = useState<string | null>(null);
   const [transferAvailable, setTransferAvailable] = useState(false);
   const [payphoneAvailable, setPayphoneAvailable] = useState(false);
@@ -383,18 +387,38 @@ export function MyContacts() {
   const [unlockedLoading, setUnlockedLoading] = useState(true);
 
   const loadData = useCallback(async () => {
-    if (!auth.userId) return;
+    if (!auth.userId) {
+      setInboxLoading(false);
+      setUnlockedLoading(false);
+      return;
+    }
 
     setInboxLoading(true);
     setUnlockedLoading(true);
+    setInboxError('');
 
-    const [available, unlocked, sentQuotes] = await Promise.all([
+    const [availableResult, unlockedResult, sentQuotesResult, transfersResult] = await Promise.allSettled([
       listMatchingRequestsForProfessional(auth.userId),
       listUnlockedContacts(auth.userId),
       listQuotesByProfessional(),
+      listMyTransfers(),
     ]);
 
-    // Filter out already-purchased from inbox
+    const available = availableResult.status === 'fulfilled' ? availableResult.value : [];
+    const unlocked = unlockedResult.status === 'fulfilled' ? unlockedResult.value : [];
+    const sentQuotes = sentQuotesResult.status === 'fulfilled' ? sentQuotesResult.value : [];
+    if (transfersResult.status === 'fulfilled') {
+      const byRequest: Record<string, TransferPayment> = {};
+      for (const transfer of transfersResult.value) {
+        const requestId = transfer.metadata?.requestId;
+        if (requestId && !byRequest[requestId] && ['awaiting_transfer', 'under_review', 'rejected'].includes(transfer.status)) byRequest[requestId] = transfer;
+      }
+      setTransferPayments(byRequest);
+    } else setTransferPayments({});
+    if (availableResult.status === 'rejected') {
+      setInboxError(availableResult.reason instanceof Error ? availableResult.reason.message : 'No se pudieron cargar las solicitudes.');
+    }
+
     const unlockedRequestIds = new Set(unlocked.map((u) => u.purchase.requestId));
     setInboxJobs(available.filter((j) => !unlockedRequestIds.has(j.id)));
     setUnlockedContacts(unlocked);
@@ -504,10 +528,21 @@ export function MyContacts() {
           <p className="text-sm font-semibold text-blue-800">¿Cómo funciona?</p>
           <p className="text-sm text-blue-700 mt-0.5">
             Ves la descripción y ubicación del trabajo. El nombre, teléfono y correo del cliente se revelan
-            únicamente cuando pagas el <strong>costo indicado</strong> para ese contacto.
+            cuando se valida el <strong>pago del costo indicado</strong> para ese contacto.
           </p>
         </div>
       </div>
+
+      {activeTab === 'inbox' && Object.keys(transferPayments).length > 0 && <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h2 className="font-bold text-[#101828]">Transferencias en curso</h2>
+        <p className="mt-1 text-sm text-gray-700">El número del cliente seguirá bloqueado hasta que el equipo valide el pago.</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {Object.entries(transferPayments).map(([requestId, transfer]) => <button key={transfer.id} type="button" onClick={() => { window.location.href = `/dashboard/transfer/${requestId}?paymentId=${transfer.id}`; }} className="rounded-lg border border-amber-300 bg-white p-3 text-left text-sm hover:border-[#101828]">
+            <span className="block font-semibold">{transfer.status === 'under_review' ? 'Comprobante en revisión' : transfer.status === 'rejected' ? 'Comprobante rechazado: revisar' : 'Transferencia pendiente'}</span>
+            <span className="font-mono text-xs text-gray-600">Referencia {transfer.reference}</span>
+          </button>)}
+        </div>
+      </section>}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200 gap-1">
@@ -554,6 +589,9 @@ export function MyContacts() {
       {/* ─── TAB: INBOX ─────────────────────────────────────────── */}
       {activeTab === 'inbox' && (
         <>
+          {inboxError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {inboxError} <button type="button" onClick={loadData} className="ml-2 font-semibold underline">Reintentar</button>
+          </div>}
           {inboxLoading ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {[1, 2, 3, 4].map((i) => (
@@ -595,6 +633,7 @@ export function MyContacts() {
                   onPay={handlePay}
                   onCard={handleCardPay}
                   transferAvailable={transferAvailable}
+                  transferPayment={transferPayments[job.id]}
                   payphoneAvailable={payphoneAvailable}
                   cardAvailable={cardAvailable}
                 />

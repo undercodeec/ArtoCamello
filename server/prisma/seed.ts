@@ -14,7 +14,7 @@ const rolePermissions: Record<string, string[]> = {
 async function main() {
   await db.tenant.upsert({ where: { id: 'artocamello' }, update: {}, create: {
     id: 'artocamello', slug: 'artocamello', name: 'ArtoCamello',
-    settings: { maxProfessionalsPerLead: 4, leadFeeRate: 0.06, leadMinCostUSD: 3, currency: 'USD', transferExpiryHours: 72, bankAccounts: [] },
+    settings: { maxProfessionalsPerLead: 4, leadFeeRate: 0.06, leadMinCostUSD: 3, currency: 'USD', transferExpiryHours: 72, bankAccounts: [{ bankName: 'Banco Pichincha', accountName: 'Rommel Alexander Pangay Sigcho', accountNumber: '2215913574', accountType: 'Cuenta de ahorro transaccional', accountHolderId: '1104326853' }] },
   }});
   for (const hostname of ['artocamello.com', 'www.artocamello.com', 'api.artocamello.com', 'admin.artocamello.com']) {
     await db.tenantDomain.upsert({ where: { hostname }, update: {}, create: { tenantId: 'artocamello', hostname, isPrimary: hostname === 'artocamello.com' } });

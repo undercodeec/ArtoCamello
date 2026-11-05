@@ -4,14 +4,17 @@ import { useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import { useAuth } from '@/shared/context/AuthContext';
 import { updateProfessionalProfile } from '@/services/professionalService';
+import { UserRole } from '@/domain/types';
 
 export function OnboardingPage() {
-  const [selectedRole, setSelectedRole] = useState<'client' | 'freelancer' | null>(null);
-  const [step, setStep] = useState(1);
+  const { updateRole, auth } = useAuth();
+  const [selectedRole, setSelectedRole] = useState<'client' | 'freelancer' | null>(auth.role === UserRole.PROFESSIONAL ? 'freelancer' : null);
+  const [step, setStep] = useState(auth.role === UserRole.PROFESSIONAL ? 4 : 1);
   const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<'basic' | 'pro'>('pro'); // Default to pro since it's "Recomendado"
   const [isTeam, setIsTeam] = useState<'independent' | 'team' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [onboardingError, setOnboardingError] = useState('');
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [profileData, setProfileData] = useState({
     fullName: '',
@@ -35,7 +38,6 @@ export function OnboardingPage() {
     'Árabe', 'Ruso', 'Holandés', 'Sueco', 'Catalán',
   ];
   const navigate = useNavigate();
-  const { updateRole } = useAuth();
   
   const [newSkill, setNewSkill] = useState("");
   
@@ -51,11 +53,20 @@ export function OnboardingPage() {
   };
 
   const handleNext = async () => {
+    setOnboardingError('');
     if (step === 1) {
       if (selectedRole === 'client') {
         setStep(2);
       } else if (selectedRole === 'freelancer') {
-        setStep(4);
+        try {
+          setIsSubmitting(true);
+          await updateRole('pro');
+          setStep(4);
+        } catch (e) {
+          setOnboardingError(e instanceof Error ? e.message : 'No se pudo guardar tu elección. Intenta de nuevo.');
+        } finally {
+          setIsSubmitting(false);
+        }
       }
     } else if (step === 2) {
       try {
@@ -64,6 +75,7 @@ export function OnboardingPage() {
         navigate('/');
       } catch(e) {
         console.error("Error finalizing onboarding", e);
+        setOnboardingError(e instanceof Error ? e.message : 'No se pudo completar el registro.');
       } finally {
         setIsSubmitting(false);
       }
@@ -73,17 +85,18 @@ export function OnboardingPage() {
     } else if (step === 3 || step === 6) {
       try {
         setIsSubmitting(true);
-        const nextRole = selectedRole === 'freelancer' ? 'pro' : 'client';
-        
-        await updateRole(nextRole);
-        
-        if (nextRole === 'pro' && (profileData.fullName || profileData.businessName || profileData.bio || profileData.portfolioImages.length > 0 || profileData.avatarUrl)) {
-           await updateProfessionalProfile(profileData);
+        if (selectedRole === 'freelancer') {
+          if (profileData.fullName || profileData.businessName || profileData.bio || profileData.portfolioImages.length > 0 || profileData.avatarUrl) {
+            await updateProfessionalProfile(profileData);
+          }
+          navigate('/dashboard');
+        } else {
+          await updateRole('client');
+          navigate('/');
         }
-
-        navigate(nextRole === 'pro' ? '/dashboard' : '/');
       } catch(e) {
         console.error("Error finalizing onboarding", e);
+        setOnboardingError(e instanceof Error ? e.message : 'No se pudo completar el registro.');
       } finally {
         setIsSubmitting(false);
       }
@@ -426,11 +439,11 @@ export function OnboardingPage() {
           
           <div className="flex justify-between items-center px-8 py-4 max-w-[1200px] mx-auto">
             <button 
-              onClick={() => setStep(1)}
+              onClick={() => navigate('/dashboard')}
               className="flex items-center gap-2 text-[#101828] font-bold text-[15px] hover:text-gray-600 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
-              Atrás
+              Ir al panel
             </button>
 
             <button 
@@ -474,6 +487,7 @@ export function OnboardingPage() {
       )}
 
       <div className={`w-full ${step >= 2 ? 'max-w-[1000px]' : 'max-w-[900px]'} px-6 pt-10 pb-10 flex flex-col items-center flex-grow`}>
+        {onboardingError && <p role="alert" className="mb-6 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{onboardingError}</p>}
         {step === 1 && (
           <>
             {/* Header Step 1 */}
@@ -590,14 +604,14 @@ export function OnboardingPage() {
             >
               <button
                 onClick={handleNext}
-                disabled={!selectedRole}
+                disabled={!selectedRole || isSubmitting}
                 className={`px-8 py-3 rounded text-[16px] font-semibold transition-all duration-200 ${
                   selectedRole
                     ? 'bg-[#101828] text-white hover:bg-gray-800'
                     : 'bg-[#E4E5E7] text-[#B5B6BA] cursor-not-allowed'
                 }`}
               >
-                Siguiente
+                {isSubmitting ? 'Guardando...' : selectedRole === 'freelancer' ? 'Continuar como profesional' : 'Siguiente'}
               </button>
             </motion.div>
           </>
@@ -756,6 +770,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
+                disabled={isSubmitting}
                 className={`px-8 py-2.5 rounded-md text-[15px] font-bold transition-all duration-200 ${
                   selectedPurposes.length > 0
                     ? 'bg-[#101828] text-white hover:bg-gray-800'
@@ -776,7 +791,7 @@ export function OnboardingPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
-              className="text-center w-full mb-10"
+              className="text-center w-full mb-6"
             >
               <h1 className="text-[#101828] text-[32px] font-bold leading-tight mb-3">
                 ¿Formas parte de un equipo?
@@ -790,11 +805,11 @@ export function OnboardingPage() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.1 }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full mb-10"
+              className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full mb-6"
             >
               <button
                 onClick={() => setIsTeam('independent')}
-                className={`relative flex flex-col items-center justify-center h-[280px] p-6 rounded-lg border text-center transition-all duration-200 ${
+                className={`relative flex flex-col items-center justify-center min-h-[210px] md:min-h-[240px] p-6 rounded-lg border text-center transition-all duration-200 ${
                   isTeam === 'independent' 
                     ? 'border-[#101828] ring-1 ring-[#101828] shadow-md' 
                     : 'border-gray-200 hover:border-gray-400'
@@ -818,7 +833,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={() => setIsTeam('team')}
-                className={`relative flex flex-col items-center justify-center h-[280px] p-6 rounded-lg border text-center transition-all duration-200 ${
+                className={`relative flex flex-col items-center justify-center min-h-[210px] md:min-h-[240px] p-6 rounded-lg border text-center transition-all duration-200 ${
                   isTeam === 'team' 
                     ? 'border-[#101828] ring-1 ring-[#101828] shadow-md' 
                     : 'border-gray-200 hover:border-gray-400'
@@ -848,7 +863,7 @@ export function OnboardingPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.3 }}
-              className="w-full flex justify-between items-center mt-auto pt-6"
+              className="w-full flex justify-between items-center pt-4"
             >
               <button
                 onClick={() => setStep(4)}
@@ -938,6 +953,7 @@ export function OnboardingPage() {
 
               <button
                 onClick={handleNext}
+                disabled={isSubmitting}
                 className="bg-[#101828] text-white px-8 py-3 rounded text-[16px] font-semibold hover:bg-gray-800 transition-colors"
               >
                 Continuar

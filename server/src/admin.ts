@@ -229,15 +229,12 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const tenantId = req.admin!.tenantId;
     const filters: Prisma.UserWhereInput[] = [{ tenantId }];
     if (req.query.role === 'client') {
-      // Las cuentas se crean como guest y pasan a client al terminar el onboarding.
-      // Deben poder gestionarse desde Clientes aunque el usuario haya abandonado ese paso.
-      // Se excluyen las cuentas guest que ya son administradores activos.
-      filters.push({ OR: [
-        { role: 'client' },
-        { role: 'guest', memberships: { none: { tenantId, status: 'active' } } },
-      ] });
+      filters.push({ role: 'client' });
     } else if (req.query.role === 'pro') {
       filters.push({ role: 'pro' });
+    } else if (req.query.role === 'guest') {
+      // Aún no han elegido un rol; excluir cuentas usadas para administrar.
+      filters.push({ role: 'guest', memberships: { none: { tenantId, status: { in: ['active', 'invited'] } } } });
     }
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     if (search) filters.push({ OR: [{ fullName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] });
@@ -351,7 +348,13 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const hours = Number(incoming.transferExpiryHours ?? current.transferExpiryHours);
     const cardEnabled = incoming.cardEnabled === undefined ? current.cardEnabled : incoming.cardEnabled;
     const accounts = incoming.bankAccounts === undefined ? current.bankAccounts : incoming.bankAccounts;
-    if (!Number.isInteger(max) || max < 1 || max > 20 || !Number.isFinite(rate) || rate <= 0 || rate > 1 || !Number.isFinite(minimum) || minimum < 0 || minimum > 1000 || !Number.isInteger(hours) || hours < 1 || hours > 720 || typeof cardEnabled !== 'boolean' || (cardEnabled && !kushkiConfigFor(c.tenantId)) || !Array.isArray(accounts) || accounts.length > 5 || accounts.some((a: any) => typeof a.bankName !== 'string' || a.bankName.length > 100 || typeof a.accountName !== 'string' || a.accountName.length > 100 || typeof a.accountNumber !== 'string' || !/^[0-9 -]{4,32}$/.test(a.accountNumber))) { res.status(400).json({ error: 'Configuración inválida o tarjeta sin proveedor configurado' }); return; }
+    const invalidAccount = (a: any) => !a || typeof a !== 'object'
+      || typeof a.bankName !== 'string' || a.bankName.length > 100
+      || typeof a.accountName !== 'string' || a.accountName.length > 100
+      || typeof a.accountNumber !== 'string' || !/^[0-9 -]{4,32}$/.test(a.accountNumber)
+      || (a.accountType !== undefined && (typeof a.accountType !== 'string' || a.accountType.length > 100))
+      || (a.accountHolderId !== undefined && (typeof a.accountHolderId !== 'string' || (a.accountHolderId !== '' && !/^[0-9]{10}$/.test(a.accountHolderId))));
+    if (!Number.isInteger(max) || max < 1 || max > 20 || !Number.isFinite(rate) || rate <= 0 || rate > 1 || !Number.isFinite(minimum) || minimum < 0 || minimum > 1000 || !Number.isInteger(hours) || hours < 1 || hours > 720 || typeof cardEnabled !== 'boolean' || (cardEnabled && !kushkiConfigFor(c.tenantId)) || !Array.isArray(accounts) || accounts.length > 5 || accounts.some(invalidAccount)) { res.status(400).json({ error: 'Configuración inválida o tarjeta sin proveedor configurado' }); return; }
     const settings = { ...current, maxProfessionalsPerLead: max, leadFeeRate: rate, leadMinCostUSD: minimum, transferExpiryHours: hours, cardEnabled, bankAccounts: accounts };
     await db.$transaction(async tx => { await tx.tenant.update({ where: { id: c.tenantId }, data: { settings } }); await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'settings.manage', entityType: 'Tenant', entityId: c.tenantId, before: { maxProfessionalsPerLead: current.maxProfessionalsPerLead, leadFeeRate: current.leadFeeRate, leadMinCostUSD: current.leadMinCostUSD, transferExpiryHours: current.transferExpiryHours, cardEnabled: current.cardEnabled, bankAccountCount: current.bankAccounts.length }, after: { maxProfessionalsPerLead: max, leadFeeRate: rate, leadMinCostUSD: minimum, transferExpiryHours: hours, cardEnabled, bankAccountCount: accounts.length }, ip: req.ip } }); });
     res.json({ settings });

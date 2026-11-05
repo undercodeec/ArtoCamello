@@ -2,7 +2,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 const token = () => sessionStorage.getItem('authToken') || '';
 
 export type TransferPayment = { id: string; reference: string; amount: string; currency: string; status: string; expiresAt?: string; transfers?: Array<{ reviewNote?: string }>; bankAccounts?: BankAccount[] };
-export type BankAccount = { bankName: string; accountName: string; accountNumber: string; accountType?: string };
+export type BankAccount = { bankName: string; accountName: string; accountNumber: string; accountType?: string; accountHolderId?: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}/payments${path}`, { ...init, headers: { Authorization: `Bearer ${token()}`, ...(init?.body ? { 'Content-Type': 'application/json' } : {}), ...init?.headers } });

@@ -23,7 +23,7 @@ export type Payment = {
   lead?: { id: string; title: string; status: string } | null;
   payer: { id: string; fullName: string; email: string };
   transfers?: Array<{ id: string; bankName: string; declaredAmount: string | null; transferReference: string; transferredAt: string; createdAt: string; proofUrl: string; proofMimeType?: string; reviewNote?: string; reviewer?: { fullName: string } }>;
-  possibleDuplicates?: number; bankAccounts?: Array<{ bankName: string; accountName: string; accountNumber: string }>;
+  possibleDuplicates?: number; bankAccounts?: Array<{ bankName: string; accountName: string; accountNumber: string; accountType?: string; accountHolderId?: string }>;
   events?: Array<{ id: string; type: string; source: string; createdAt: string }>;
   allocations?: Array<{ id: string; subjectId: string; amount: string }>;
 };

@@ -17,6 +17,7 @@ const nav = [
   ['/payments', 'Todos los pagos', 'payments.read'],
   ['/users/clients', 'Clientes', 'users.read'],
   ['/users/professionals', 'Profesionales', 'users.read'],
+  ['/users/pending', 'Registros pendientes', 'users.read'],
   ['/access/admins', 'Administradores', 'admins.read'],
   ['/access/roles', 'Roles y permisos', 'roles.read'],
   ['/settings', 'Configuración', 'settings.read'],
@@ -24,7 +25,7 @@ const nav = [
 ];
 const navIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   '/': LayoutDashboard, '/payments/transfers': CreditCard, '/payments': ClipboardList,
-  '/users/clients': UsersIcon, '/users/professionals': UserRound, '/access/admins': ShieldCheck,
+  '/users/clients': UsersIcon, '/users/professionals': UserRound, '/users/pending': UsersIcon, '/access/admins': ShieldCheck,
   '/access/roles': ShieldCheck, '/settings': Settings2, '/audit': ClipboardList,
 };
 const input = 'border border-gray-300 rounded-lg px-3 py-2 bg-white text-sm';
@@ -78,6 +79,7 @@ export function AdminPanel() {
       {paymentDetailMatch && <PaymentDetailPage id={decodeURIComponent(paymentDetailMatch[1])} canReview={permissions.has('payments.review')} />}
       {sub === '/users/clients' && <Users role="client" permissions={permissions} />}
       {sub === '/users/professionals' && <Users role="pro" permissions={permissions} />}
+      {sub === '/users/pending' && <Users role="guest" permissions={permissions} />}
       {sub === '/access/admins' && <Admins permissions={permissions} />}
       {sub === '/access/roles' && <Roles permissions={permissions} />}
       {sub === '/settings' && <Settings permissions={permissions} />}
@@ -232,7 +234,7 @@ function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }
         {data.lead && <p><b>Solicitud</b><br />{data.lead.title}<br /><span className="text-gray-600">{data.lead.status}</span></p>}
       </div>
       {data.possibleDuplicates ? <p className="bg-amber-100 p-3 rounded text-sm">Posibles comprobantes o referencias repetidas: {data.possibleDuplicates}. Revisa antes de aprobar.</p> : null}
-      {!!data.bankAccounts?.length && <div className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-3">Cuenta receptora</h2>{data.bankAccounts.map(a => <p key={`${a.bankName}-${a.accountNumber}`} className="bg-gray-50 p-3 rounded text-sm"><b>{a.bankName}</b> · {a.accountName} · {a.accountNumber}</p>)}</div>}
+      {!!data.bankAccounts?.length && <div className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-3">Cuenta receptora</h2>{data.bankAccounts.map(a => <p key={`${a.bankName}-${a.accountNumber}`} className="bg-gray-50 p-3 rounded text-sm"><b>{a.bankName}</b> · {a.accountType || 'Cuenta bancaria'} · {a.accountNumber} · {a.accountName}{a.accountHolderId ? ` · Cédula ${a.accountHolderId}` : ''}</p>)}</div>}
       {data.transfers?.map((transfer, index) => <div key={transfer.id} className="bg-white border rounded-xl p-5"><h2 className="font-bold text-lg mb-4">Comprobante {transferCount > 1 ? `#${transferCount - index}` : ''}</h2><div className="grid gap-4 lg:grid-cols-2"><div className="space-y-2 text-sm"><p><b>Banco de origen:</b> {transfer.bankName}</p><p><b>Referencia declarada:</b> {transfer.transferReference}</p><p><b>Monto declarado:</b> {transfer.declaredAmount === null ? 'No registrado (comprobante anterior)' : money(transfer.declaredAmount, data.currency)}</p>{transfer.declaredAmount !== null && Number(transfer.declaredAmount) !== Number(data.amount) && <p className="text-red-700 font-semibold">El monto declarado no coincide con el pago esperado. Rechaza este comprobante.</p>}<p><b>Transferida:</b> {date(transfer.transferredAt)}</p><p><b>Enviada por el profesional:</b> {date(transfer.createdAt)}</p><p><b>Revisor:</b> {transfer.reviewer?.fullName || 'Pendiente'}{transfer.reviewNote ? ` · ${transfer.reviewNote}` : ''}</p></div><PrivateProofPreview proofUrl={transfer.proofUrl} mimeType={transfer.proofMimeType} onOpen={() => openProof(transfer.proofUrl)} /></div></div>)}
       {data.method === 'transfer' && !transferCount && <div className="bg-white border rounded-xl p-5 text-sm text-gray-600">El profesional todavía no ha enviado un comprobante.</div>}
       {canReview && data.method === 'card' && data.status !== 'allocated' && <button disabled={busy} className={button} onClick={reconcile}>Conciliar con Kushki</button>}
@@ -267,13 +269,14 @@ function PrivateProofPreview({ proofUrl, mimeType, onOpen }: { proofUrl: string;
   return <div className="border rounded-lg bg-gray-50 p-3"><p className="font-semibold text-sm mb-2">Archivo cargado</p>{loading && <p className="text-sm text-gray-600">Cargando imagen…</p>}{imageUrl && <img src={imageUrl} alt="Comprobante de transferencia enviado por el profesional" className="w-full max-h-[30rem] object-contain bg-white rounded border" />}{!loading && !imageUrl && !error && <p className="text-sm text-gray-600">Comprobante en PDF.</p>}{error && <p className="text-sm text-red-700">{error}</p>}<button className="underline text-blue-700 text-sm mt-3" onClick={onOpen}>Abrir comprobante</button></div>;
 }
 
-function Users({ role, permissions }: { role: 'client' | 'pro'; permissions: Set<string> }) {
+function Users({ role, permissions }: { role: 'client' | 'pro' | 'guest'; permissions: Set<string> }) {
   const [search, setSearch] = useState(''); const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
   const { data, error, loading, reload } = useData<List<{ id: string; email: string; fullName: string; role: 'client' | 'guest' | 'pro'; active: boolean; createdAt: string; professionalProfile?: { verified: boolean }; _count: { serviceRequests: number } }>>(`/users?role=${role}&search=${encodeURIComponent(search)}&page=${page}`);
   const change = async (id: string, active: boolean) => { const reason = window.prompt(active ? 'Motivo de reactivación' : 'Motivo de suspensión'); if (!reason) return; try { await adminRequest(`/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ active, reason }) }); reload(); } catch (e) { alert((e as Error).message); } };
   const verify = async (id: string, verified: boolean) => { if (!window.confirm(verified ? '¿Verificar profesional?' : '¿Revocar verificación?')) return; try { await adminRequest(`/professionals/${id}/verify`, { method: 'POST', body: JSON.stringify({ verified }) }); reload(); } catch (e) { alert((e as Error).message); } };
-  return <section><h1 className="text-3xl font-bold mb-5">{role === 'pro' ? 'Profesionales' : 'Clientes'}</h1>{role === 'client' && <p className="text-sm text-gray-600 mb-4">Incluye cuentas registradas que aún no han completado su perfil de cliente.</p>}<input className={`${input} mb-4`} placeholder="Nombre o correo" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : <><div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Nombre</th><th>Correo</th><th>Estado</th><th>{role === 'pro' ? 'Verificación' : 'Solicitudes'}</th><th>Alta</th><th></th></tr></thead><tbody>{data?.items.length ? data.items.map(u => <tr key={u.id} className="border-t"><td className="p-3">{u.fullName}{u.role === 'guest' && <span className="block text-xs text-amber-700">Registro pendiente</span>}</td><td>{u.email}</td><td>{u.active ? 'Activo' : 'Suspendido'}</td><td>{role === 'pro' ? (u.professionalProfile?.verified ? 'Verificado' : 'Pendiente') : u._count.serviceRequests}</td><td>{date(u.createdAt)}</td><td className="space-x-2"><button className="underline" onClick={() => setSelected(u.id)}>Detalle</button>{permissions.has('users.manage') && <button className="underline" onClick={() => change(u.id, !u.active)}>{u.active ? 'Suspender' : 'Reactivar'}</button>}{role === 'pro' && permissions.has('professionals.verify') && <button className="underline" onClick={() => verify(u.id, !u.professionalProfile?.verified)}>{u.professionalProfile?.verified ? 'Revocar' : 'Verificar'}</button>}</td></tr>) : <tr><td className="p-5 text-gray-500" colSpan={6}>No hay usuarios para mostrar.</td></tr>}</tbody></table></div><Pager page={page} total={data?.total || 0} onPage={setPage} /></>}{selected && <UserDetail id={selected} onClose={() => setSelected(null)} />}</section>;
+  const title = role === 'pro' ? 'Profesionales' : role === 'client' ? 'Clientes' : 'Registros pendientes';
+  return <section><h1 className="text-3xl font-bold mb-5">{title}</h1>{role === 'guest' && <p className="text-sm text-gray-600 mb-4">Estas cuentas aún no han elegido si serán clientes o profesionales.</p>}<input className={`${input} mb-4`} placeholder="Nombre o correo" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : <><div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Nombre</th><th>Correo</th><th>Estado</th><th>{role === 'pro' ? 'Verificación' : role === 'client' ? 'Solicitudes' : 'Rol'}</th><th>Alta</th><th></th></tr></thead><tbody>{data?.items.length ? data.items.map(u => <tr key={u.id} className="border-t"><td className="p-3">{u.fullName}</td><td>{u.email}</td><td>{u.active ? 'Activo' : 'Suspendido'}</td><td>{role === 'pro' ? (u.professionalProfile?.verified ? 'Verificado' : 'Pendiente') : role === 'client' ? u._count.serviceRequests : 'Sin definir'}</td><td>{date(u.createdAt)}</td><td className="space-x-2"><button className="underline" onClick={() => setSelected(u.id)}>Detalle</button>{permissions.has('users.manage') && <button className="underline" onClick={() => change(u.id, !u.active)}>{u.active ? 'Suspender' : 'Reactivar'}</button>}{role === 'pro' && permissions.has('professionals.verify') && <button className="underline" onClick={() => verify(u.id, !u.professionalProfile?.verified)}>{u.professionalProfile?.verified ? 'Revocar' : 'Verificar'}</button>}</td></tr>) : <tr><td className="p-5 text-gray-500" colSpan={6}>No hay usuarios para mostrar.</td></tr>}</tbody></table></div><Pager page={page} total={data?.total || 0} onPage={setPage} /></>}{selected && <UserDetail id={selected} onClose={() => setSelected(null)} />}</section>;
 }
 
 function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
@@ -307,7 +310,7 @@ function RoleCard({ role, allCodes, canEdit, onChanged }: { role: { id: string; 
 }
 
 function Settings({ permissions }: { permissions: Set<string> }) {
-  type Account = { bankName: string; accountName: string; accountNumber: string; accountType?: string };
+  type Account = { bankName: string; accountName: string; accountNumber: string; accountType?: string; accountHolderId?: string };
   const { data, error, loading, reload } = useData<{ name: string; cardConfigured: boolean; settings: { maxProfessionalsPerLead: number; leadFeeRate: number; leadMinCostUSD: number; transferExpiryHours: number; cardEnabled: boolean; bankAccounts: Account[] } }>('/settings');
   const [limit, setLimit] = useState(4);
   const [rate, setRate] = useState(6);
@@ -343,7 +346,7 @@ function Settings({ permissions }: { permissions: Set<string> }) {
     {!data?.cardConfigured && <p className="text-sm text-gray-500">Faltan credenciales y habilitación del proveedor en este ambiente.</p>}
     <div className="flex justify-between items-center"><h2 className="font-bold">Cuentas receptoras</h2>{canEdit && accounts.length < 5 && <button className="underline text-sm" onClick={() => setAccounts([...accounts, { bankName: '', accountName: '', accountNumber: '' }])}>Añadir cuenta</button>}</div>
     {accounts.map((account, index) => <div key={index} className="border rounded-lg p-3 space-y-2">
-      {([['Banco','bankName'],['Titular','accountName'],['Número de cuenta','accountNumber'],['Tipo de cuenta','accountType']] as const).map(([label, field]) => <label key={field} className="block text-sm">{label}<input className={`${input} block mt-1 w-full`} value={account[field] || ''} onChange={e => updateAccount(index, field, e.target.value)} disabled={!canEdit} /></label>)}
+      {([['Banco','bankName'],['Titular','accountName'],['Cédula del titular','accountHolderId'],['Número de cuenta','accountNumber'],['Tipo de cuenta','accountType']] as const).map(([label, field]) => <label key={field} className="block text-sm">{label}<input className={`${input} block mt-1 w-full`} value={account[field] || ''} onChange={e => updateAccount(index, field, e.target.value)} disabled={!canEdit} /></label>)}
       {canEdit && <button className="text-red-700 underline text-sm" onClick={() => setAccounts(accounts.filter((_, i) => i !== index))}>Quitar cuenta</button>}
     </div>)}
     {!accounts.length && <p className="text-sm text-gray-500">Sin cuentas configuradas. Las transferencias permanecerán deshabilitadas.</p>}

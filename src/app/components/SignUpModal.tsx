@@ -61,6 +61,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         const user = await login(email.trim(), password);
         onClose();
         if (user.role === UserRole.PROFESSIONAL) navigate('/dashboard');
+        else if (user.role === UserRole.GUEST) navigate('/onboarding');
       } else {
         if (password !== confirmPassword) {
           setError('Las contraseñas no coinciden.');

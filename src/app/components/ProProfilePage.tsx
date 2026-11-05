@@ -8,6 +8,10 @@ import { getProfessionalById, PublicProfessional, postReview, getPublicProfessio
 import { toast } from 'sonner';
 import { getQuestionsForCategories } from '../constants/serviceQuestions';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
+import { getCurrentAuth } from '@/services/authService';
+import { createServiceRequest } from '@/services/requestService';
+import { UrgencyLevel, UserRole } from '@/domain/types';
+import { LocationMapPicker, type MapLocation } from './LocationMapPicker';
 
 const FALLBACK_IMAGES = [
   "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwd29ya2luZ3xlbnwxfHx8fDE3NzQwMTI5NzV8MA&ixlib=rb-4.1.0&q=80&w=1080",
@@ -15,6 +19,14 @@ const FALLBACK_IMAGES = [
   "https://images.unsplash.com/photo-1765518440022-10242cc86895?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3cmVuY2glMjB0b29sfGVufDF8fHx8MTc3NDA4NTgzOHww&ixlib=rb-4.1.0&q=80&w=1080",
   "https://images.unsplash.com/photo-1734689604220-712f496a9e21?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmaXhpbmclMjBzaW5rfGVufDF8fHx8MTc3NDExMzc5NXww&ixlib=rb-4.1.0&q=80&w=1080",
   "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwdG9vbHN8ZW58MXx8fHwxNzc0MTA1Nzc5fDA&ixlib=rb-4.1.0&q=80&w=1080"
+];
+
+const CITY_OPTIONS = [
+  'Alóag', 'Amaguaña', 'Calderón', 'Cayambe', 'Conocoto', 'Cumbayá',
+  'El Quinche', 'Machachi', 'Mindo', 'Nanegalito', 'Pedro Vicente Maldonado',
+  'Pifo', 'Píntag', 'Puembo', 'Puerto Quito', 'Quito',
+  'San Antonio de Pichincha', 'San Miguel de los Bancos', 'Sangolquí',
+  'Tabacundo', 'Tambillo', 'Tumbaco', 'Yaruquí',
 ];
 
 export function ProProfilePage() {
@@ -104,6 +116,89 @@ export function ProProfilePage() {
   const [locationAddress, setLocationAddress] = useState('');
   const [serviceDate, setServiceDate] = useState('');
   const [serviceTime, setServiceTime] = useState('');
+  const [estimatedBudget, setEstimatedBudget] = useState('');
+  const [isMapOpen, setIsMapOpen] = useState(false);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [requestError, setRequestError] = useState('');
+
+  const handleMapSelection = (location: MapLocation) => {
+    setLocationCity(location.city);
+    setLocationAddress(location.address);
+    setIsMapOpen(false);
+    setRequestError('');
+  };
+
+  const handleSubmitRequest = async () => {
+    if (isSubmittingRequest || !pro) return;
+    setRequestError('');
+    const auth = getCurrentAuth();
+    if (!auth.isAuthenticated) {
+      setIsLoginModalOpen(true);
+      return;
+    }
+    if (auth.role !== UserRole.CLIENT) {
+      setRequestError(auth.role === UserRole.GUEST
+        ? 'Completa el registro como cliente antes de enviar una solicitud.'
+        : 'Las solicitudes solo pueden enviarse desde una cuenta de cliente.');
+      return;
+    }
+    if (!locationCity.trim() || !locationAddress.trim()) {
+      setRequestError('Indica la ciudad y la dirección del servicio.');
+      setFormStep(2);
+      return;
+    }
+    if (!contactName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) || contactPhone.replace(/\D/g, '').length < 7) {
+      setRequestError('Completa tu nombre, correo y teléfono válidos.');
+      return;
+    }
+    const budget = Number(estimatedBudget);
+    if (!Number.isFinite(budget) || budget <= 0) {
+      setRequestError('Indica un presupuesto estimado mayor a cero.');
+      return;
+    }
+
+    const category = pro.profile?.categories?.[0];
+    if (!category) {
+      setRequestError('Este profesional aún no tiene una categoría de servicio disponible.');
+      return;
+    }
+    const details = questionSet.questions
+      .filter(question => !question.showWhen || formAnswers[question.showWhen.questionId] === question.showWhen.value)
+      .map(question => {
+        const value = formAnswers[question.id];
+        if (!value) return '';
+        return `${question.label} ${question.options?.find(option => option.value === value)?.label || value}`;
+      })
+      .filter(Boolean);
+    const description = [
+      ...details,
+      additionalInfo.trim(),
+      serviceTime ? `Horario preferido: ${serviceTime === 'morning' ? 'Mañana (08:00 - 12:00)' : serviceTime === 'afternoon' ? 'Tarde (13:00 - 17:00)' : 'Noche (18:00 - 21:00)'}` : '',
+    ].filter(Boolean).join('\n');
+
+    try {
+      setIsSubmittingRequest(true);
+      await createServiceRequest({
+        categorySlug: category,
+        title: `Solicitud de ${questionSet.title || category}`,
+        description,
+        location: `${locationAddress.trim()}, ${locationCity.trim()}`,
+        urgency: UrgencyLevel.MEDIUM,
+        ...(serviceDate ? { preferredDate: new Date(`${serviceDate}T12:00:00`).toISOString() } : {}),
+        contactEmail: contactEmail.trim(),
+        contactPhone: contactPhone.trim(),
+        contactName: contactName.trim(),
+        estimatedBudget: budget,
+      });
+      setIsDrawerOpen(false);
+      navigate('/mis-solicitudes');
+      toast.success('Solicitud enviada correctamente.');
+    } catch (cause) {
+      setRequestError(cause instanceof Error ? cause.message : 'No se pudo enviar la solicitud. Intenta nuevamente.');
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
 
   // Review Form State
   const [newRating, setNewRating] = useState(0);
@@ -910,29 +1005,8 @@ export function ProProfilePage() {
                           onChange={(e) => setLocationCity(e.target.value)}
                         >
                           <option value="">Selecciona una ciudad / localidad</option>
-                          <option value="aloag">Alóag</option>
-                          <option value="amaguana">Amaguaña</option>
-                          <option value="calderon">Calderón</option>
-                          <option value="cayambe">Cayambe</option>
-                          <option value="conocoto">Conocoto</option>
-                          <option value="cumbaya">Cumbayá</option>
-                          <option value="el_quinche">El Quinche</option>
-                          <option value="machachi">Machachi</option>
-                          <option value="mindo">Mindo</option>
-                          <option value="nanegalito">Nanegalito</option>
-                          <option value="pedro_vicente_maldonado">Pedro Vicente Maldonado</option>
-                          <option value="pifo">Pifo</option>
-                          <option value="pintag">Píntag</option>
-                          <option value="puembo">Puembo</option>
-                          <option value="puerto_quito">Puerto Quito</option>
-                          <option value="quito">Quito</option>
-                          <option value="san_antonio_pichincha">San Antonio de Pichincha</option>
-                          <option value="san_miguel_bancos">San Miguel de los Bancos</option>
-                          <option value="sangolqui">Sangolquí</option>
-                          <option value="tabacundo">Tabacundo</option>
-                          <option value="tambillo">Tambillo</option>
-                          <option value="tumbaco">Tumbaco</option>
-                          <option value="yaruqui">Yaruquí</option>
+                          {locationCity && !CITY_OPTIONS.includes(locationCity) && <option value={locationCity}>{locationCity}</option>}
+                          {CITY_OPTIONS.map(city => <option key={city} value={city}>{city}</option>)}
                         </select>
                       </div>
 
@@ -950,7 +1024,7 @@ export function ProProfilePage() {
                       </div>
 
                       <div className="pt-2">
-                        <button className="flex items-center gap-2 text-sm text-[#101828] font-medium hover:text-[#FFCA0C] transition-colors p-2 border border-dashed border-gray-300 rounded-lg w-full justify-center bg-gray-50 hover:bg-white">
+                        <button type="button" onClick={() => setIsMapOpen(true)} className="flex items-center gap-2 text-sm text-[#101828] font-medium hover:text-[#FFCA0C] transition-colors p-2 border border-dashed border-gray-300 rounded-lg w-full justify-center bg-gray-50 hover:bg-white">
                           <Map className="w-4 h-4" />
                           Seleccionar ubicación en el mapa
                         </button>
@@ -1000,8 +1074,16 @@ export function ProProfilePage() {
                   </div>
 
                   <div className="pt-6 border-t border-gray-100">
+                      {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
                       <button 
-                        onClick={() => setFormStep(3)}
+                        onClick={() => {
+                          if (!locationCity.trim() || !locationAddress.trim()) {
+                            setRequestError('Indica la ciudad y la dirección del servicio.');
+                            return;
+                          }
+                          setRequestError('');
+                          setFormStep(3);
+                        }}
                         className="w-full bg-[#101828] hover:bg-[#101828]/90 text-white font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center"
                       >
                         Siguiente
@@ -1065,23 +1147,23 @@ export function ProProfilePage() {
                           onChange={(e) => setContactPhone(e.target.value)}
                         />
                       </div>
+                      <div>
+                        <label htmlFor="request-budget" className="block text-sm font-semibold text-gray-700 mb-1">Presupuesto estimado (USD)</label>
+                        <p className="text-xs text-gray-500 mb-2">Indica cuánto calculas invertir en este trabajo.</p>
+                        <input id="request-budget" type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="Ej: 50" value={estimatedBudget} onChange={event => setEstimatedBudget(event.target.value)} className="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#FFCA0C]" />
+                      </div>
                     </div>
                   </div>
 
                   <div className="pt-6 border-t border-gray-100">
+                      {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
                       <button 
-                        onClick={() => {
-                          if (!isAuthenticated) {
-                            setIsLoginModalOpen(true);
-                            return;
-                          }
-                          // Submit form action here
-                          setIsDrawerOpen(false);
-                          setTimeout(() => setFormStep(1), 300);
-                        }}
-                        className="w-full bg-[#101828] hover:bg-[#101828]/90 text-white font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center"
+                        type="button"
+                        onClick={handleSubmitRequest}
+                        disabled={isSubmittingRequest}
+                        className="w-full bg-[#101828] hover:bg-[#101828]/90 text-white font-bold py-4 px-4 rounded-lg transition-colors flex items-center justify-center disabled:opacity-60"
                       >
-                        {isAuthenticated ? 'Enviar solicitud' : 'Inicia sesión para enviar'}
+                        {isSubmittingRequest ? 'Enviando...' : isAuthenticated ? 'Enviar solicitud' : 'Inicia sesión para enviar'}
                       </button>
                   </div>
                 </motion.div>
@@ -1093,6 +1175,8 @@ export function ProProfilePage() {
           </>
         )}
       </AnimatePresence>
+
+      {isMapOpen && <LocationMapPicker initialQuery={locationAddress || locationCity} onClose={() => setIsMapOpen(false)} onSelect={handleMapSelection} />}
 
       <SignUpModal 
         isOpen={isLoginModalOpen} 

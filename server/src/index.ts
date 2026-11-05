@@ -515,7 +515,7 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
     if (req.user!.role !== 'client') { res.status(403).json({ error: 'Solo los clientes pueden crear solicitudes.' }); return; }
     const {
       categorySlug, title, description, location,
-      urgency, preferredDate, contactPhone, contactEmail, estimatedBudget,
+      urgency, preferredDate, contactPhone, contactEmail, contactName, estimatedBudget,
     } = req.body;
 
     if (!estimatedBudget || estimatedBudget <= 0) {
@@ -536,6 +536,7 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
         status: 'contact_limit_open',
         contactPhone,
         contactEmail,
+        contactName: typeof contactName === 'string' ? contactName.trim().slice(0, 100) || null : null,
         estimatedBudget: parseFloat(estimatedBudget),
       },
     });
@@ -596,7 +597,7 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
       : requests;
 
     // Añadir costUSD calculado para que el frontend lo muestre sin lógica de negocio
-    const enriched = filtered.map(({ contactPhone: _phone, contactEmail: _email, ...r }) => ({
+    const enriched = filtered.map(({ contactPhone: _phone, contactEmail: _email, contactName: _name, ...r }) => ({
       ...r,
       maxProfessionalsPerLead: maxProfessionals,
       costUSD: leadAmount(r.estimatedBudget, settingsOf(tenant.settings)).toNumber(),
@@ -845,7 +846,7 @@ app.get('/api/leads/unlocked', authenticateToken, async (req: AuthRequest, res: 
         payphoneTransactionId: p.payphoneTransactionId,
       },
       requestTitle: p.request.title,
-      clientName: p.request.client.fullName,
+      clientName: p.request.contactName || p.request.client.fullName,
       clientPhone: p.request.contactPhone,
       clientEmail: p.request.contactEmail,
       location: p.request.location,

@@ -94,6 +94,7 @@ export interface ServiceRequest {
   status: RequestStatus;
   contactPhone: string;
   contactEmail: string;
+  contactName?: string;
   estimatedBudget: number;  // Presupuesto estimado del trabajo en USD
   costUSD?: number;         // Costo calculado por el backend (6% de estimatedBudget)
   maxProfessionalsPerLead?: number;

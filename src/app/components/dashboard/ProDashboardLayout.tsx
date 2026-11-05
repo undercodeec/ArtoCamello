@@ -31,7 +31,7 @@ export function ProDashboardLayout() {
         const unlockedIds = new Set(unlocked.map((u) => u.purchase.requestId));
         const newCount = available.filter((j) => !unlockedIds.has(j.id)).length;
         setPendingCount(newCount);
-      });
+      }).catch(() => setPendingCount(0));
     }
   }, [auth.userId]);
 

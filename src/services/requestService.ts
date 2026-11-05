@@ -11,6 +11,15 @@ function getAuthToken(): string | null {
   return sessionStorage.getItem('authToken');
 }
 
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  const body = await response.text();
+  try {
+    const message = JSON.parse(body).error;
+    if (typeof message === 'string' && message) return new Error(message);
+  } catch { /* HTML or empty response */ }
+  return new Error(fallback);
+}
+
 // --- Payloads ---
 export interface CreateRequestPayload {
   categorySlug: string;
@@ -21,6 +30,7 @@ export interface CreateRequestPayload {
   preferredDate?: string;
   contactPhone: string;
   contactEmail: string;
+  contactName?: string;
   estimatedBudget: number; // Presupuesto estimado del trabajo en USD (requerido)
 }
 
@@ -44,8 +54,7 @@ export async function createServiceRequest(payload: CreateRequestPayload): Promi
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || 'Error al crear la petición');
+    throw await responseError(response, 'No se pudo enviar la solicitud. Comprueba la conexión e intenta nuevamente.');
   }
 
   return response.json();
@@ -63,7 +72,7 @@ export async function listRequestsByClient(clientId: string): Promise<ServiceReq
     headers: { 'Authorization': `Bearer ${token}` }
   });
 
-  if (!response.ok) return [];
+  if (!response.ok) throw await responseError(response, 'No se pudieron cargar tus solicitudes. Intenta nuevamente.');
   return response.json();
 }
 
@@ -79,7 +88,7 @@ export async function listMatchingRequestsForProfessional(professionalId: string
     headers: { 'Authorization': `Bearer ${token}` }
   });
 
-  if (!response.ok) return [];
+  if (!response.ok) throw await responseError(response, 'No se pudieron cargar las solicitudes disponibles. Intenta nuevamente.');
   return response.json();
 }
 

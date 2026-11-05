@@ -4,9 +4,9 @@ import { Link } from 'react-router';
 
 export function CategoryNav() {
   const categories = [
-    { icon: HardHat, name: 'Albañiles', slug: 'reformas' },
+    { icon: HardHat, name: 'Albañiles', slug: 'albanileria' },
     { icon: Leaf, name: 'Jardineros', slug: 'jardineria' },
-    { icon: Wrench, name: 'Manitas a\ndomicilio', slug: 'reformas' },
+    { icon: Wrench, name: 'Manitas a\ndomicilio', slug: 'mantenimiento' },
     { icon: Paintbrush, name: 'Pintores', slug: 'pintura' },
     { icon: Droplets, name: 'Fontaneros', slug: 'fontaneria' },
     { icon: Zap, name: 'Electricistas', slug: 'electricidad' },

@@ -160,6 +160,7 @@ model ServiceRequest {
   status          RequestStatus @default(draft)
   contactPhone    String
   contactEmail    String
+  contactName     String?
   estimatedBudget Float         @default(0) // Presupuesto estimado en USD ingresado por el cliente
   purchaseCount   Int           @default(0)
 

@@ -7,7 +7,7 @@ export type TenantSettings = {
   currency: string;
   transferExpiryHours: number;
   cardEnabled: boolean;
-  bankAccounts: Array<{ bankName: string; accountName: string; accountNumber: string; accountType?: string }>;
+  bankAccounts: Array<{ bankName: string; accountName: string; accountNumber: string; accountType?: string; accountHolderId?: string }>;
 };
 
 export function settingsOf(value: unknown): TenantSettings {

@@ -7,19 +7,19 @@ export interface ServiceItem {
 
 export const POPULAR_SERVICES: ServiceItem[] = [
   // Column 1
-  { label: 'Albañiles', active: true, slug: 'reformas' },
+  { label: 'Albañiles', active: true, slug: 'albanileria' },
   { label: 'Jardineros', slug: 'jardineria' },
-  { label: 'Manitas a domicilio', slug: 'reformas' },
+  { label: 'Manitas a domicilio', slug: 'mantenimiento' },
   { label: 'Pintores', slug: 'pintura' },
   { label: 'Fontaneros', slug: 'fontaneria' },
-  { label: 'Adiestrador canino' },
+  { label: 'Adiestrador canino', slug: 'adiestrador-canino' },
   // Column 2
   { label: 'Electricistas', slug: 'electricidad' },
-  { label: 'Entrenador personal' },
+  { label: 'Entrenador personal', slug: 'entrenador-personal' },
   { label: 'Limpieza a domicilio', slug: 'limpieza' },
-  { label: 'Alquiler de furgonetas con conductor', isLong: true, slug: 'mudanzas' },
+  { label: 'Alquiler de furgonetas con conductor', isLong: true, slug: 'alquiler-furgonetas' },
   { label: 'Carpinteros', slug: 'carpinteria' },
-  { label: 'Psicólogos' },
+  { label: 'Psicólogos', slug: 'psicologia' },
   // Column 3
   { label: 'Desbrozar parcela', slug: 'jardineria' },
   { label: 'Cambiar bañera por plato de ducha', isLong: true, slug: 'reformas' },

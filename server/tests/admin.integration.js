@@ -88,7 +88,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal(clientUsersResponse.status, 200);
     const clientUsers = await clientUsersResponse.json();
     assert.ok(clientUsers.items.some(user => user.id === ids.client));
-    assert.ok(clientUsers.items.some(user => user.id === ids.guest));
+    assert.ok(!clientUsers.items.some(user => user.id === ids.guest));
     assert.ok(!clientUsers.items.some(user => user.id === ids.a));
     const clientRequestInput = { categorySlug: 'test', title: 'Unauthorized request', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private@example.test', estimatedBudget: 100 };
     assert.equal((await call('/api/requests', ids.a, 'POST', clientRequestInput)).status, 403);

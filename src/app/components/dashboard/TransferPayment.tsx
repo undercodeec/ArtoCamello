@@ -1,26 +1,145 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { BankAccount, TransferPayment, createTransferIntent, getTransferPayment, submitTransferProof } from '@/services/transferService';
+
+const statusLabels: Record<string, string> = {
+  awaiting_transfer: 'Esperando comprobante',
+  under_review: 'Comprobante en revisión',
+  rejected: 'Comprobante rechazado',
+  allocated: 'Pago validado y contacto habilitado',
+  expired: 'Referencia vencida',
+};
 
 export function TransferPaymentPage() {
   const { requestId = '' } = useParams();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const paymentId = params.get('paymentId');
   const [payment, setPayment] = useState<TransferPayment | null>(null);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
-  const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
-  const [bankName, setBankName] = useState(''); const [accountLast4, setAccountLast4] = useState(''); const [transferReference, setTransferReference] = useState(''); const [transferredAt, setTransferredAt] = useState(''); const [declaredAmount, setDeclaredAmount] = useState(''); const [file, setFile] = useState<File | null>(null);
-  useEffect(() => { if (paymentId) getTransferPayment(paymentId).then(data => { setPayment(data); setAccounts(data.bankAccounts || []); }).catch(e => setError(e.message)); else createTransferIntent(requestId).then(data => { setPayment(data.payment); setAccounts(data.bankAccounts); }).catch(e => setError(e.message)); }, [requestId, paymentId]);
-  useEffect(() => { if (payment) setDeclaredAmount(Number(payment.amount).toFixed(2)); }, [payment?.id]);
-  const refresh = async () => { if (!payment) return; try { setPayment(await getTransferPayment(payment.id)); } catch (e) { setError((e as Error).message); } };
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); if (!payment || !file) return; if (file.size > 5_000_000) { setError('El comprobante supera 5 MB'); return; } setBusy(true); setError(''); try { await submitTransferProof(payment.id, { bankName, accountLast4, transferReference, transferredAt: new Date(transferredAt).toISOString(), declaredAmount, file }); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
-  return <div className="max-w-3xl mx-auto p-5 md:p-8 bg-white rounded-xl border"><Link to="/dashboard/jobs" className="underline text-sm">← Volver a oportunidades</Link><h1 className="text-2xl font-bold mt-4 mb-2">Pago por transferencia</h1><p className="text-gray-600 mb-5">El contacto se desbloqueará cuando un revisor confirme el pago.</p>
-    {error && <p className="bg-red-50 text-red-700 p-3 rounded mb-4">{error}</p>}{!payment ? !error && 'Preparando pago...' : <>
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2"><p><b>Monto exacto:</b> {Number(payment.amount).toFixed(2)} {payment.currency}</p><p><b>Referencia única:</b> <span className="font-mono">{payment.reference}</span></p><p><b>Estado:</b> {({ awaiting_transfer: 'Esperando comprobante', under_review: 'En revisión', rejected: 'Rechazado', allocated: 'Aprobado', expired: 'Vencido' } as Record<string,string>)[payment.status] || payment.status}</p>{payment.expiresAt && <p><b>Vence:</b> {new Date(payment.expiresAt).toLocaleString('es-EC')}</p>}{payment.transfers?.[0]?.reviewNote && <p><b>Motivo del revisor:</b> {payment.transfers[0].reviewNote}</p>}</div>
-      <div className="grid gap-3 my-5">{accounts.map(a => <div key={a.accountNumber} className="border rounded-xl p-4"><p className="font-bold">{a.bankName}</p><p>{a.accountName}</p><p>{a.accountType} · {a.accountNumber}</p></div>)}</div>
-      {payment.status === 'expired' && <button className="bg-[#101828] text-white px-5 py-3 rounded-lg" onClick={() => createTransferIntent(requestId).then(data => { setPayment(data.payment); setAccounts(data.bankAccounts); }).catch(e => setError(e.message))}>Crear nueva referencia</button>}
-      {['awaiting_transfer','rejected'].includes(payment.status) && <form onSubmit={submit} className="space-y-4"><h2 className="text-xl font-bold">Enviar comprobante</h2><label className="block text-sm font-medium">Banco de origen<input required maxLength={100} className="block w-full border rounded-lg p-2 mt-1" value={bankName} onChange={e => setBankName(e.target.value)} /></label><label className="block text-sm font-medium">Últimos 4 dígitos de cuenta origen (opcional)<input pattern="[0-9]{4}" maxLength={4} className="block w-full border rounded-lg p-2 mt-1" value={accountLast4} onChange={e => setAccountLast4(e.target.value)} /></label><label className="block text-sm font-medium">Referencia del banco<input required maxLength={100} className="block w-full border rounded-lg p-2 mt-1" value={transferReference} onChange={e => setTransferReference(e.target.value)} /></label><label className="block text-sm font-medium">Monto transferido ({payment.currency})<input required type="number" min="0.01" step="0.01" className="block w-full border rounded-lg p-2 mt-1" value={declaredAmount} onChange={e => setDeclaredAmount(e.target.value)} /></label><label className="block text-sm font-medium">Fecha y hora de transferencia<input required type="datetime-local" className="block w-full border rounded-lg p-2 mt-1" value={transferredAt} onChange={e => setTransferredAt(e.target.value)} /></label><label className="block text-sm font-medium">Comprobante PDF, JPG o PNG (máx. 5 MB)<input required type="file" accept="application/pdf,image/jpeg,image/png" className="block w-full mt-1" onChange={e => setFile(e.target.files?.[0] || null)} /></label><button disabled={busy || !file} className="bg-[#101828] text-white px-5 py-3 rounded-lg disabled:opacity-50">{busy ? 'Enviando...' : 'Enviar para revisión'}</button></form>}
-      <button className="underline text-sm mt-5" onClick={refresh}>Actualizar estado</button>
-    </>}
-  </div>;
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [bankName, setBankName] = useState('');
+  const [accountLast4, setAccountLast4] = useState('');
+  const [transferReference, setTransferReference] = useState('');
+  const [transferredAt, setTransferredAt] = useState('');
+  const [declaredAmount, setDeclaredAmount] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setError('');
+    const load = paymentId
+      ? getTransferPayment(paymentId).then(data => ({ payment: data, bankAccounts: data.bankAccounts || [] }))
+      : createTransferIntent(requestId);
+    load.then(data => {
+      if (!active) return;
+      setPayment(data.payment);
+      setAccounts(data.bankAccounts);
+    }).catch(cause => {
+      if (active) setError(cause instanceof Error ? cause.message : 'No se pudo preparar la transferencia.');
+    });
+    return () => { active = false; };
+  }, [requestId, paymentId]);
+
+  useEffect(() => {
+    if (payment) setDeclaredAmount(Number(payment.amount).toFixed(2));
+  }, [payment?.id]);
+
+  const refresh = async () => {
+    if (!payment) return;
+    setError('');
+    try {
+      const updated = await getTransferPayment(payment.id);
+      setPayment(updated);
+      setAccounts(updated.bankAccounts || []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo actualizar el estado.');
+    }
+  };
+
+  const renew = async () => {
+    setError('');
+    try {
+      const data = await createTransferIntent(requestId);
+      setPayment(data.payment);
+      setAccounts(data.bankAccounts);
+      navigate(`/dashboard/transfer/${requestId}?paymentId=${data.payment.id}`, { replace: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo crear una nueva referencia.');
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!payment || !file) return;
+    if (file.size > 5_000_000) {
+      setError('El comprobante supera 5 MB.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await submitTransferProof(payment.id, {
+        bankName: bankName.trim(), accountLast4: accountLast4.trim(),
+        transferReference: transferReference.trim(),
+        transferredAt: new Date(transferredAt).toISOString(),
+        declaredAmount, file,
+      });
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'No se pudo enviar el comprobante.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl rounded-xl border bg-white p-5 md:p-8">
+      <Link to="/dashboard/contacts" className="text-sm font-medium text-[#101828] underline">← Volver a Mis Contactos</Link>
+      <h1 className="mt-4 text-2xl font-bold text-[#101828]">Desbloquear contacto por transferencia</h1>
+      <p className="mb-5 mt-2 text-gray-600">Transfiere el monto exacto y envía el comprobante. Una vez validado el pago por el equipo de ArtoCamello, se habilitarán el número y los datos de contacto del cliente para contactarlo directamente.</p>
+
+      {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {!payment ? (!error && <p role="status">Preparando los datos del pago...</p>) : <>
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+          <p><strong>Monto exacto:</strong> {Number(payment.amount).toFixed(2)} {payment.currency}</p>
+          <p><strong>Referencia de ArtoCamello:</strong> <span className="font-mono">{payment.reference}</span></p>
+          <p><strong>Estado:</strong> {statusLabels[payment.status] || payment.status}</p>
+          {payment.expiresAt && <p><strong>Vence:</strong> {new Date(payment.expiresAt).toLocaleString('es-EC')}</p>}
+          {payment.transfers?.[0]?.reviewNote && <p><strong>Nota de revisión:</strong> {payment.transfers[0].reviewNote}</p>}
+        </div>
+
+        {payment.status !== 'allocated' && <section className="my-5">
+          <h2 className="mb-3 text-lg font-bold text-[#101828]">Cuenta receptora</h2>
+          <div className="grid gap-3">
+            {accounts.map(account => <div key={`${account.bankName}-${account.accountNumber}`} className="rounded-xl border border-gray-200 p-4 text-sm">
+              <p className="text-base font-bold text-[#101828]">{account.bankName}</p>
+              <p><strong>Tipo:</strong> {account.accountType || 'Cuenta bancaria'}</p>
+              <p><strong>Número:</strong> <span className="font-mono font-semibold">{account.accountNumber}</span></p>
+              <p><strong>Titular:</strong> {account.accountName}</p>
+              {account.accountHolderId && <p><strong>Cédula:</strong> {account.accountHolderId}</p>}
+            </div>)}
+          </div>
+          <p className="mt-3 text-xs text-gray-600">Usa la referencia de ArtoCamello en el concepto de la transferencia si tu banco permite ingresarla.</p>
+        </section>}
+
+        {payment.status === 'under_review' && <div role="status" className="my-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">Recibimos tu comprobante. El contacto seguirá bloqueado hasta que el equipo valide el pago. Puedes actualizar el estado desde esta página.</div>}
+        {payment.status === 'allocated' && <div role="status" className="my-5 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">Pago validado. El número del cliente ya está disponible en Mis Contactos. <Link to="/dashboard/contacts" className="font-bold underline">Ver contacto</Link></div>}
+        {payment.status === 'expired' && <button type="button" onClick={renew} className="mt-5 rounded-lg bg-[#101828] px-5 py-3 font-semibold text-white">Crear nueva referencia</button>}
+        {['awaiting_transfer', 'rejected'].includes(payment.status) && <form onSubmit={submit} className="mt-5 space-y-4 border-t pt-5">
+          <h2 className="text-xl font-bold text-[#101828]">Enviar comprobante</h2>
+          {payment.status === 'rejected' && <p className="text-sm text-red-700">Corrige los datos indicados en la nota de revisión y vuelve a enviar el comprobante.</p>}
+          <label className="block text-sm font-medium">Banco de origen<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={bankName} onChange={event => setBankName(event.target.value)} /></label>
+          <label className="block text-sm font-medium">Últimos 4 dígitos de la cuenta de origen (opcional)<input pattern="[0-9]{4}" maxLength={4} className="mt-1 block w-full rounded-lg border p-2" value={accountLast4} onChange={event => setAccountLast4(event.target.value)} /></label>
+          <label className="block text-sm font-medium">Referencia emitida por el banco<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label>
+          <label className="block text-sm font-medium">Monto transferido ({payment.currency})<input required type="number" min="0.01" step="0.01" className="mt-1 block w-full rounded-lg border p-2" value={declaredAmount} onChange={event => setDeclaredAmount(event.target.value)} /></label>
+          <label className="block text-sm font-medium">Fecha y hora de la transferencia<input required type="datetime-local" className="mt-1 block w-full rounded-lg border p-2" value={transferredAt} onChange={event => setTransferredAt(event.target.value)} /></label>
+          <label className="block text-sm font-medium">Comprobante PDF, JPG o PNG (máx. 5 MB)<input required type="file" accept="application/pdf,image/jpeg,image/png" className="mt-1 block w-full" onChange={event => setFile(event.target.files?.[0] || null)} /></label>
+          <button type="submit" disabled={busy || !file} className="rounded-lg bg-[#101828] px-5 py-3 font-semibold text-white disabled:opacity-50">{busy ? 'Enviando...' : 'Enviar para revisión'}</button>
+        </form>}
+        <button type="button" onClick={refresh} className="mt-5 block text-sm font-semibold text-[#101828] underline">Actualizar estado</button>
+      </>}
+    </div>
+  );
 }
