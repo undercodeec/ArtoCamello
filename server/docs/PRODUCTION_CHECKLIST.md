@@ -10,6 +10,8 @@
 
 ## Requiere entorno y datos reales
 
+- [ ] Configurar `RECAPTCHA_SECRET_KEY` en la API y `VITE_RECAPTCHA_SITE_KEY` al construir el frontend; registrar los dominios públicos de cada tenant en reCAPTCHA y probar que el servidor rechaza un token de otro dominio. Comprobar la entrega SMTP y el enlace de verificación de correo antes de habilitar nuevos registros.
+- [ ] Antes de migrar solicitudes históricas en cuarentena (`legacy_unclassified`), revisar cuáles fueron enviadas desde un perfil profesional y obtener la decisión comercial de cada una. No publicar automáticamente una solicitud sin destinatario conocido.
 - [ ] Restaurar una copia reciente de la base de producción en un entorno aislado, aplicar migraciones y ejecutar `pnpm prisma:reconcile`. Comprobar conteos, importes y referencias de PayPhone antes del despliegue.
 - [ ] Configurar cuentas bancarias, SMTP, `CLAMSCAN_PATH`, `JWT_SECRET`, `MFA_ENCRYPTION_KEY`, copias de PostgreSQL y `server/private-proofs/`, y el dominio principal de cada tenant. Configurar DNS y TLS de `admin.artocamello.com`, publicar ahí el frontend, y definir `ADMIN_HOSTNAMES=admin.artocamello.com` en el API. Definir la política de retención de comprobantes y auditoría con el negocio.
 - [ ] Probar con credenciales del comercio los flujos aprobado, cancelado, monto incorrecto y retorno perdido de [PayPhone](PAYPHONE_PROVIDER.md). Confirmar que el dominio y el tiempo de confirmación funcionan como espera el proveedor.

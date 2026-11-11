@@ -48,9 +48,10 @@ test('admin lists clients, professionals and unclassified registrations separate
       { id: ids.invited, tenantId, email: `${ids.invited}@example.test`, fullName: 'Invited admin', role: 'guest', emailVerified: true },
     ] });
     const permission = await prisma.permission.findUniqueOrThrow({ where: { code: 'users.read' } });
+    const verifyPermission = await prisma.permission.findUniqueOrThrow({ where: { code: 'professionals.verify' } });
     const role = await prisma.adminRole.create({ data: {
       tenantId, code: 'test_reader', name: 'Test reader',
-      permissions: { create: { permissionId: permission.id } },
+      permissions: { create: [{ permissionId: permission.id }, { permissionId: verifyPermission.id }] },
     } });
     await prisma.tenantMembership.createMany({ data: [
       { tenantId, userId: ids.admin, roleId: role.id, status: 'active' },
@@ -70,7 +71,7 @@ test('admin lists clients, professionals and unclassified registrations separate
     assert.deepEqual(new Set(await list('pro')), new Set([ids.admin, ids.pro]));
 
     const guestToken = jwt.sign({ userId: ids.guest, sessionVersion: 0 }, secret);
-    const claim = await request('/api/auth/role', guestToken, { 'Content-Type': 'application/json' }, { role: 'client' });
+    const claim = await request('/api/auth/role', guestToken, { 'Content-Type': 'application/json' }, { role: 'client', fullName: 'Cliente Invitado', phone: '0991234567' });
     assert.equal(claim.status, 200);
     assert.deepEqual(await list('guest'), [ids.guestPro]);
     assert.deepEqual(new Set(await list('client')), new Set([ids.client, ids.guest]));
@@ -82,8 +83,13 @@ test('admin lists clients, professionals and unclassified registrations separate
     assert.ok((await list('pro')).includes(ids.guestPro));
     const unfinishedProfile = await prisma.professionalProfile.findUniqueOrThrow({ where: { userId: ids.guestPro } });
     assert.equal(unfinishedProfile.verified, false);
+    const verifyRoute = `/api/admin/professionals/${ids.guestPro}/verify`;
+    assert.equal((await request(verifyRoute, adminToken, { 'X-Admin-Email-Session': emailSession, 'Content-Type': 'application/json' }, { verified: true })).status, 409);
+    await prisma.professionalProfile.update({ where: { userId: ids.guestPro }, data: { categories: ['fontaneria'] } });
+    assert.equal((await request(verifyRoute, adminToken, { 'X-Admin-Email-Session': emailSession, 'Content-Type': 'application/json' }, { verified: true })).status, 200);
   } finally {
     await new Promise(resolve => server.close(resolve));
+    await prisma.auditLog.deleteMany({ where: { tenantId } });
     await prisma.tenantMembership.deleteMany({ where: { tenantId } });
     await prisma.rolePermission.deleteMany({ where: { role: { tenantId } } });
     await prisma.adminRole.deleteMany({ where: { tenantId } });

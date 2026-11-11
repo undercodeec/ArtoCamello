@@ -6,20 +6,13 @@ require('dotenv').config();
 process.env.PAYPHONE_TOKEN = '';
 process.env.PAYPHONE_STORE_ID = '';
 process.env.PAYPHONE_MOCK = 'true';
-process.env.ADMIN_MFA_REQUIRED = 'false';
-process.env.ADMIN_EMAIL_CODE_REQUIRED = 'false';
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const http = require('node:http');
 const { PrismaClient } = require('@prisma/client');
 const { app, prisma: appDb } = require('../dist/index.js');
-const { totp } = require('../dist/adminMfa.js');
 const { expirePendingPayments } = require('../dist/payments.js');
 const { PayPhoneProvider } = require('../dist/payphoneProvider.js');
-
-test('TOTP follows the RFC 6238 SHA-1 test vector', () => {
-  assert.equal(totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 1, 8), '94287082');
-});
 
 test('PayPhone prepares and confirms against the documented button API', async () => {
   const provider = new PayPhoneProvider('test-token', 'test-store', 'https://pay.payphonetodoesposible.com', 'http://localhost:5173');
@@ -58,7 +51,9 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
   const base = `http://127.0.0.1:${address.port}`;
   const token = userId => jwt.sign({ userId }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-session' });
   const call = async (route, userId, method = 'GET', body, host, extraHeaders = {}) => new Promise((resolve, reject) => {
-    const request = http.request(`${base}${route}`, { method, headers: { Host: host || (userId === ids.b ? hostB : hostA), Authorization: `Bearer ${token(userId)}`, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders } }, response => {
+    const adminTenantId = userId === ids.b ? tenantB : tenantA;
+    const adminEmailSession = jwt.sign({ userId, tenantId: adminTenantId, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-email' });
+    const request = http.request(`${base}${route}`, { method, headers: { Host: host || (userId === ids.b ? hostB : hostA), Authorization: `Bearer ${token(userId)}`, 'X-Admin-Email-Session': adminEmailSession, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extraHeaders } }, response => {
       const chunks = []; response.on('data', chunk => chunks.push(chunk)); response.on('end', () => { const raw = Buffer.concat(chunks).toString(); resolve({ status: response.statusCode, json: async () => JSON.parse(raw || '{}') }); });
     });
     request.on('error', reject); if (body) request.write(JSON.stringify(body)); request.end();
@@ -75,9 +70,9 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
       { id: ids.guest, tenantId: tenantA, email: `${ids.guest}@example.test`, fullName: 'Guest', role: 'guest', emailVerified: true },
     ] });
     const [proA, pro2, pro3] = await Promise.all([
-      db.professionalProfile.create({ data: { userId: ids.a, tenantId: tenantA, bio: '', categories: [], serviceZones: [], verified: true, documentType: 'cedula', documentId: '1712345678', address: 'Private street' } }),
-      db.professionalProfile.create({ data: { userId: ids.pro2, tenantId: tenantA, bio: '', categories: [], serviceZones: [] } }),
-      db.professionalProfile.create({ data: { userId: ids.pro3, tenantId: tenantA, bio: '', categories: [], serviceZones: [] } }),
+      db.professionalProfile.create({ data: { userId: ids.a, tenantId: tenantA, bio: '', categories: ['test'], serviceZones: [], verified: true, documentType: 'cedula', documentId: '1712345678', address: 'Private street' } }),
+      db.professionalProfile.create({ data: { userId: ids.pro2, tenantId: tenantA, bio: '', categories: ['test'], serviceZones: [], verified: true } }),
+      db.professionalProfile.create({ data: { userId: ids.pro3, tenantId: tenantA, bio: '', categories: ['test'], serviceZones: [], verified: true } }),
     ]);
     const [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead] = await Promise.all(['payments.read','payments.review','users.manage','admins.manage','users.read','dashboard.read','audit.read'].map(code => db.permission.findUniqueOrThrow({ where: { code } })));
     const roleA = await db.adminRole.create({ data: { tenantId: tenantA, code: 'reviewer', name: 'Reviewer', permissions: { create: [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead].map(permission => ({ permissionId: permission.id })) } } });
@@ -90,20 +85,10 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.ok(clientUsers.items.some(user => user.id === ids.client));
     assert.ok(!clientUsers.items.some(user => user.id === ids.guest));
     assert.ok(!clientUsers.items.some(user => user.id === ids.a));
-    const clientRequestInput = { categorySlug: 'test', title: 'Unauthorized request', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private@example.test', estimatedBudget: 100 };
+    const clientRequestInput = { visibility: 'marketplace', categorySlug: 'test', title: 'Unauthorized request', description: 'Test', city: 'Test', location: 'Test', urgency: 'medium', contactPhone: 'private', contactEmail: 'private@example.test', estimatedBudget: 100 };
     assert.equal((await call('/api/requests', ids.a, 'POST', clientRequestInput)).status, 403);
     assert.equal((await call('/api/requests', ids.guest, 'POST', clientRequestInput)).status, 403);
-    const originalGoogleFetch = global.fetch;
-    global.fetch = async (url, init) => {
-      assert.equal(String(url), 'https://www.googleapis.com/oauth2/v3/userinfo');
-      assert.equal(init.headers.Authorization, 'Bearer ya29.test-token');
-      return Response.json({ email: `${ids.a}@example.test`, email_verified: true, name: 'A' });
-    };
-    try {
-      const googleLogin = await call('/api/auth/google', ids.a, 'POST', { credential: 'ya29.test-token' });
-      assert.equal(googleLogin.status, 200);
-      assert.equal('verificationToken' in (await googleLogin.json()).user, false);
-    } finally { global.fetch = originalGoogleFetch; }
+    assert.equal((await call('/api/auth/google', ids.a, 'POST', { credential: 'ya29.test-token' })).status, 404);
     const preflight = await fetch(`${base}/api/payments/card-intents`, { method: 'OPTIONS', headers: { Origin: `https://${hostA}`, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-admin-email-session,idempotency-key' } });
     assert.equal(preflight.status, 204);
     assert.match(preflight.headers.get('access-control-allow-headers') || '', /Idempotency-Key/i);
@@ -121,7 +106,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await call('/api/auth/role', ids.a, 'POST', { role: 'client' })).status, 409);
     assert.equal((await call('/api/auth/role', ids.client, 'POST', { role: 'pro' })).status, 409);
     assert.equal((await db.professionalProfile.count({ where: { userId: ids.a } })), 1);
-    assert.equal((await call('/api/auth/role', ids.guest, 'POST', { role: 'client' })).status, 200);
+    assert.equal((await call('/api/auth/role', ids.guest, 'POST', { role: 'client', fullName: 'Cliente Invitado', phone: '0991234567' })).status, 200);
     assert.equal((await call('/api/auth/role', ids.guest, 'POST', { role: 'pro' })).status, 409);
     assert.equal((await db.clientProfile.count({ where: { userId: ids.guest } })), 1);
     await db.review.create({ data: { tenantId: tenantB, professionalId: ids.a, clientId: ids.b, rating: 1, comment: 'Foreign tenant review' } });
@@ -139,7 +124,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.deepEqual(reviewedDetail.reviews.map(review => review.comment), ['Own tenant review']);
     assert.equal(reviewedDetail.profile.reviewCount, 1);
     assert.equal(reviewedDetail.profile.rating, 5);
-    const request = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Test', description: 'Test', location: 'Test', contactPhone: '000', contactEmail: 'private@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const request = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Test', description: 'Test', location: 'Test', contactPhone: '000', contactEmail: 'private@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     assert.equal((await call('/api/payments/transfer-intents', ids.client, 'POST', { requestId: request.id })).status, 403);
     assert.equal((await call('/api/payments/card-intents', ids.client, 'POST', { requestId: request.id })).status, 403);
     assert.equal((await call('/api/payments/methods', ids.client)).status, 403);
@@ -200,7 +185,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.paymentAllocation.count({ where: { paymentId: payment.id } })), 1);
     assert.equal((await db.auditLog.count({ where: { tenantId: tenantA, action: 'payments.approve', entityId: payment.id } })), 1);
 
-    const request2 = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Transfer test', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private2@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const request2 = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Transfer test', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private2@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const purchase3 = await db.leadPurchase.create({ data: { tenantId: tenantA, requestId: request2.id, professionalId: pro3.id, costUSD: 6 } });
     const transfer = await db.payment.create({ data: { tenantId: tenantA, payerUserId: ids.pro3, amount: 6, method: 'transfer', status: 'awaiting_transfer', reference: `test-transfer-${suffix}`, metadata: { leadPurchaseId: purchase3.id, requestId: request2.id } } });
     const proof = { bankName: 'Test bank', transferReference: 'REF-123', transferredAt: new Date(Date.now() - 60000).toISOString(), declaredAmount: '5.00', fileBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pKcAAAAASUVORK5CYII=' };
@@ -227,15 +212,15 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.serviceRequest.findUniqueOrThrow({ where: { id: request2.id } })).purchaseCount, 1);
 
     await db.tenant.update({ where: { id: tenantA }, data: { settings: { maxProfessionalsPerLead: 1, bankAccounts: [{ bankName: 'Banco prueba', accountName: 'ArtoCamello', accountNumber: '12345678' }] } } });
-    const concurrentRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Concurrent transfer', description: 'Test', location: 'Test', contactPhone: 'private-concurrent', contactEmail: 'concurrent@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const concurrentRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Concurrent transfer', description: 'Test', location: 'Test', contactPhone: 'private-concurrent', contactEmail: 'concurrent@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const transferIntents = await Promise.all([call('/api/payments/transfer-intents', ids.pro3, 'POST', { requestId: concurrentRequest.id }), call('/api/payments/transfer-intents', ids.pro3, 'POST', { requestId: concurrentRequest.id })]);
     assert.deepEqual(transferIntents.map(response => response.status).sort(), [200, 201]);
     const transferIntentBodies = await Promise.all(transferIntents.map(response => response.json()));
     assert.equal(transferIntentBodies[0].payment.id, transferIntentBodies[1].payment.id);
     assert.equal((await db.payment.count({ where: { tenantId: tenantA, method: 'transfer', metadata: { path: ['requestId'], equals: concurrentRequest.id } } })), 1);
 
-    const request3 = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'PayPhone test', description: 'Test', location: 'Test', contactPhone: 'private3', contactEmail: 'private3@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
-    const hiredRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Already hired', description: 'Test', location: 'Test', contactPhone: 'private-hired', contactEmail: 'hired@example.test', status: 'hired', estimatedBudget: 100 } });
+    const request3 = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'PayPhone test', description: 'Test', location: 'Test', contactPhone: 'private3', contactEmail: 'private3@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const hiredRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Already hired', description: 'Test', location: 'Test', contactPhone: 'private-hired', contactEmail: 'hired@example.test', status: 'hired', estimatedBudget: 100 } });
     assert.equal((await call('/api/leads/pay', ids.pro3, 'POST', { requestId: hiredRequest.id })).status, 409);
     assert.equal((await db.payment.count({ where: { tenantId: tenantA, metadata: { path: ['requestId'], equals: hiredRequest.id } } })), 0);
     const intentResponse = await call('/api/leads/pay', ids.pro3, 'POST', { requestId: request3.id }, aliasA);
@@ -249,7 +234,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.serviceRequest.findUniqueOrThrow({ where: { id: request3.id } })).purchaseCount, 1);
     assert.equal((await db.paymentEvent.count({ where: { tenantId: tenantA, source: 'payphone', type: 'provider_approved' } })), 1);
 
-    const concurrentPayphoneRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Concurrent PayPhone test', description: 'Test', location: 'Test', contactPhone: 'private-payphone-race', contactEmail: 'payphone-race@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const concurrentPayphoneRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Concurrent PayPhone test', description: 'Test', location: 'Test', contactPhone: 'private-payphone-race', contactEmail: 'payphone-race@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const originalCreateIntent = PayPhoneProvider.prototype.createIntent;
     let payphoneIntentCalls = 0;
     PayPhoneProvider.prototype.createIntent = async function(input) {
@@ -264,7 +249,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
       assert.equal((await db.payment.count({ where: { tenantId: tenantA, method: 'payphone', metadata: { path: ['requestId'], equals: concurrentPayphoneRequest.id } } })), 1);
     } finally { PayPhoneProvider.prototype.createIntent = originalCreateIntent; }
 
-    const latePayphoneRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Late PayPhone return', description: 'Test', location: 'Test', contactPhone: 'private-payphone-late', contactEmail: 'payphone-late@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const latePayphoneRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Late PayPhone return', description: 'Test', location: 'Test', contactPhone: 'private-payphone-late', contactEmail: 'payphone-late@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const firstPayphoneIntent = await (await call('/api/leads/pay', ids.pro3, 'POST', { requestId: latePayphoneRequest.id })).json();
     await db.payment.update({ where: { tenantId_reference: { tenantId: tenantA, reference: firstPayphoneIntent.clientTxId } }, data: { expiresAt: new Date(Date.now() - 1000) } });
     await expirePendingPayments(db);
@@ -280,7 +265,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.paymentEvent.count({ where: { paymentId: secondPayphonePayment.id, type: 'manual_resolution_required' } })), 1);
     assert.equal((await (await call('/api/admin/dashboard', ids.a)).json()).unresolvedProviderPayments, 1);
 
-    const mismatchRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'PayPhone mismatch', description: 'Test', location: 'Test', contactPhone: 'private-mismatch', contactEmail: 'mismatch@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const mismatchRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'PayPhone mismatch', description: 'Test', location: 'Test', contactPhone: 'private-mismatch', contactEmail: 'mismatch@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const mismatchIntent = await (await call('/api/leads/pay', ids.pro3, 'POST', { requestId: mismatchRequest.id })).json();
     const originalGetPayment = PayPhoneProvider.prototype.getPayment;
     try {
@@ -299,7 +284,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     process.env.KUSHKI_CARD_ENABLED = 'true';
     process.env.KUSHKI_CONFIG_JSON = JSON.stringify({ [tenantA]: { merchantId, privateMerchantId: 'private-test-only', webhookSecret, environment: 'uat', webhookAmountUnit: 'cents' } });
     await db.tenant.update({ where: { id: tenantA }, data: { settings: { maxProfessionalsPerLead: 1, bankAccounts: [], cardEnabled: true } } });
-    const cardRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Card test', description: 'Test', location: 'Test', contactPhone: 'private4', contactEmail: 'private4@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const cardRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Card test', description: 'Test', location: 'Test', contactPhone: 'private4', contactEmail: 'private4@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     const previousFetch = global.fetch;
     global.fetch = async (url, init) => {
       assert.match(String(url), /api-uat\.kushkipagos\.com\/smartlink\/v1\/webcheckout/);
@@ -334,7 +319,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.serviceRequest.findUniqueOrThrow({ where: { id: cardRequest.id } })).purchaseCount, 1);
     assert.equal((await db.paymentAllocation.count({ where: { paymentId: cardIntent.payment.id } })), 1);
     assert.equal((await db.paymentEvent.count({ where: { paymentId: cardIntent.payment.id, type: 'provider_approved' } })), 1);
-    const raceRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Checkout race test', description: 'Test', location: 'Test', contactPhone: 'private-race', contactEmail: 'private-race@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const raceRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Checkout race test', description: 'Test', location: 'Test', contactPhone: 'private-race', contactEmail: 'private-race@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     global.fetch = async (_url, init) => {
       const reference = JSON.parse(init.body).additionalInformation.artocamelloPayment;
       await db.payment.update({ where: { tenantId_reference: { tenantId: tenantA, reference } }, data: { status: 'approved' } });
@@ -345,7 +330,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
       assert.equal(raceResponse.status, 409);
       assert.equal((await raceResponse.json()).payment.status, 'approved');
     } finally { global.fetch = previousFetch; }
-    const declinedRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Declined card test', description: 'Test', location: 'Test', contactPhone: 'private5', contactEmail: 'private5@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const declinedRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Declined card test', description: 'Test', location: 'Test', contactPhone: 'private5', contactEmail: 'private5@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     global.fetch = async () => Response.json({ webcheckoutId: 'webcheckout-declined-id', webcheckoutUrl: 'https://uat-webcheckout.kushkipagos.com/webcheckout/webcheckout-declined-id' });
     let declinedIntent;
     try { declinedIntent = await (await call('/api/payments/card-intents', ids.pro3, 'POST', { requestId: declinedRequest.id }, hostA, { 'Idempotency-Key': `declined-key-${suffix}` })).json(); }
@@ -356,7 +341,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await db.payment.findUniqueOrThrow({ where: { id: declinedIntent.payment.id } })).status, 'pending_provider');
     assert.equal((await webhookCall({ ...declinedPayload, id: `approved-after-decline-${suffix}`, status: 'approvedTransaction' })).status, 200);
     assert.equal((await db.serviceRequest.findUniqueOrThrow({ where: { id: declinedRequest.id } })).purchaseCount, 1);
-    const expiredRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Late webhook test', description: 'Test', location: 'Test', contactPhone: 'private-expired', contactEmail: 'private-expired@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const expiredRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Late webhook test', description: 'Test', location: 'Test', contactPhone: 'private-expired', contactEmail: 'private-expired@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     global.fetch = async () => Response.json({ webcheckoutId: 'webcheckout-expired-id', webcheckoutUrl: 'https://uat-webcheckout.kushkipagos.com/webcheckout/webcheckout-expired-id' });
     let expiredIntent;
     try { expiredIntent = await (await call('/api/payments/card-intents', ids.pro3, 'POST', { requestId: expiredRequest.id }, hostA, { 'Idempotency-Key': `expired-key-${suffix}` })).json(); }
@@ -371,7 +356,7 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await webhookCall(latePayload)).status, 200);
     assert.equal((await db.payment.findUniqueOrThrow({ where: { id: expiredIntent.payment.id } })).status, 'allocated');
     assert.equal((await db.serviceRequest.findUniqueOrThrow({ where: { id: expiredRequest.id } })).purchaseCount, 1);
-    const analyticsRequest = await db.serviceRequest.create({ data: { tenantId: tenantA, clientId: ids.client, categorySlug: 'test', title: 'Analytics test', description: 'Test', location: 'Test', contactPhone: 'private6', contactEmail: 'private6@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
+    const analyticsRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Analytics test', description: 'Test', location: 'Test', contactPhone: 'private6', contactEmail: 'private6@example.test', status: 'contact_limit_open', estimatedBudget: 100 } });
     global.fetch = async () => Response.json({ webcheckoutId: 'webcheckout-analytics-id', webcheckoutUrl: 'https://uat-webcheckout.kushkipagos.com/webcheckout/webcheckout-analytics-id' });
     let analyticsIntent;
     try { analyticsIntent = await (await call('/api/payments/card-intents', ids.pro3, 'POST', { requestId: analyticsRequest.id }, hostA, { 'Idempotency-Key': `analytics-key-${suffix}` })).json(); }
@@ -390,15 +375,9 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     const claimToken = crypto.randomBytes(32).toString('hex');
     await db.user.create({ data: { id: ids.invitee, tenantId: tenantA, email: `${ids.invitee}@example.test`, fullName: 'Invitee', role: 'guest', verificationToken: crypto.createHash('sha256').update(claimToken).digest('hex') } });
     await db.tenantMembership.create({ data: { tenantId: tenantA, userId: ids.invitee, roleId: roleA.id, status: 'invited' } });
-    assert.equal((await call('/api/admin/invitations/claim', ids.invitee, 'POST', { token: claimToken, password: 'a-strong-test-password' })).status, 200);
-    assert.equal((await call('/api/admin/me', ids.invitee)).status, 200);
-    const login = await call('/api/auth/login', ids.invitee, 'POST', { email: `${ids.invitee}@example.test`, password: 'a-strong-test-password' });
-    assert.equal(login.status, 200);
-    const loginUser = (await login.json()).user;
-    assert.equal('mfaSecret' in loginUser, false);
-    assert.equal('mfaLastCounter' in loginUser, false);
-    assert.equal('verificationToken' in loginUser, false);
-    assert.equal('mfaFailureCount' in loginUser, false);
+    assert.equal((await call('/api/admin/invitations/claim', ids.a, 'POST', { token: claimToken, password: 'a-strong-test-password' })).status, 404);
+    assert.equal((await db.tenantMembership.findUniqueOrThrow({ where: { tenantId_userId: { tenantId: tenantA, userId: ids.invitee } } })).status, 'invited');
+    assert.equal((await call('/api/admin/me', ids.invitee)).status, 403);
     for (let attempt = 0; attempt < 8; attempt++) assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 401);
     assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 429);
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: 'bad', password: 'short', fullName: 'A' })).status, 400);
@@ -410,11 +389,10 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     const previousSmtpPass = process.env.SMTP_PASS;
     delete process.env.SMTP_USER;
     delete process.env.SMTP_PASS;
-    process.env.ADMIN_EMAIL_CODE_REQUIRED = 'true';
     try {
       const adminPasswordToken = jwt.sign({ userId: ids.a, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-password', expiresIn: '10m' });
       const passwordHeaders = { Authorization: `Bearer ${adminPasswordToken}` };
-      const emailRequired = await call('/api/admin/me', ids.a);
+      const emailRequired = await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Email-Session': '' });
       assert.equal(emailRequired.status, 403);
       assert.equal((await emailRequired.json()).code, 'EMAIL_CODE_REQUIRED');
       assert.equal((await call('/api/admin/access-code/request', ids.a, 'POST', {}, hostA, passwordHeaders)).status, 503);
@@ -432,29 +410,13 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     } finally {
       if (previousSmtpUser === undefined) delete process.env.SMTP_USER; else process.env.SMTP_USER = previousSmtpUser;
       if (previousSmtpPass === undefined) delete process.env.SMTP_PASS; else process.env.SMTP_PASS = previousSmtpPass;
-      process.env.ADMIN_EMAIL_CODE_REQUIRED = 'false';
     }
 
-    process.env.ADMIN_MFA_REQUIRED = 'true';
-    const mfaRequired = await call('/api/admin/me', ids.a);
-    assert.equal(mfaRequired.status, 403);
-    assert.equal((await mfaRequired.json()).code, 'MFA_SETUP_REQUIRED');
-    const setup = await (await call('/api/admin/mfa/setup', ids.a, 'POST')).json();
-    const counter = Math.floor(Date.now() / 30000);
-    const enrolled = await call('/api/admin/mfa/confirm', ids.a, 'POST', { code: totp(setup.secret, counter) });
-    assert.equal(enrolled.status, 200);
-    const { recoveryCodes } = await enrolled.json();
-    assert.equal(recoveryCodes.length, 8);
-    assert.equal((await call('/api/admin/mfa/verify', ids.a, 'POST', { code: totp(setup.secret, counter) })).status, 401);
-    const verified = await call('/api/admin/mfa/verify', ids.a, 'POST', { code: recoveryCodes[0] });
-    assert.equal(verified.status, 200);
-    const { adminSession } = await verified.json();
-    assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Session': adminSession })).status, 200);
-    assert.equal((await call('/api/admin/mfa/verify', ids.a, 'POST', { code: recoveryCodes[0] })).status, 401);
-    for (let attempt = 0; attempt < 4; attempt++) assert.equal((await call('/api/admin/mfa/verify', ids.a, 'POST', { code: 'INVALID' })).status, 401);
-    assert.equal((await call('/api/admin/mfa/verify', ids.a, 'POST', { code: 'INVALID' })).status, 429);
+    assert.equal((await call('/api/admin/mfa/setup', ids.a, 'POST')).status, 404);
+    assert.equal((await call('/api/admin/mfa/confirm', ids.a, 'POST', { code: '123456' })).status, 404);
+    assert.equal((await call('/api/admin/mfa/verify', ids.a, 'POST', { code: '123456' })).status, 404);
     await db.user.update({ where: { id: ids.a }, data: { sessionVersion: { increment: 1 } } });
-    assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Session': adminSession })).status, 403);
+    assert.equal((await call('/api/admin/me', ids.a, 'GET', undefined, hostA, { 'X-Admin-Email-Session': adminEmailSession })).status, 403);
     assert.equal((await call('/api/requests/available', ids.a)).status, 403);
   } finally {
     await new Promise(resolve => server.close(resolve));

@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { canProfessionalAccessRequest, isPurchasableRequest, purchaseLimitForRequest } from './requestPolicy';
 
 export type TenantSettings = {
   maxProfessionalsPerLead: number;
@@ -56,11 +57,14 @@ export async function allocateLead(db: PrismaClient, paymentId: string, tenantId
     const purchase = purchaseId ? await tx.leadPurchase.findFirst({ where: { id: purchaseId, tenantId } }) : null;
     if (!purchase || purchase.status === 'paid') throw new PaymentConflict('Compra no disponible');
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId } });
-    const limit = settingsOf(tenant.settings).maxProfessionalsPerLead;
     const request = await tx.serviceRequest.findFirst({ where: { id: purchase.requestId, tenantId } });
-    if (!request || request.status === 'cancelled') throw new PaymentConflict('Solicitud no disponible');
+    const professional = await tx.professionalProfile.findUnique({ where: { id: purchase.professionalId }, include: { user: true } });
+    if (!request || !professional || !professional.user.active || !professional.user.emailVerified || !professional.verified
+      || !canProfessionalAccessRequest(request, professional.userId, professional.categories, tenantId)
+      || !isPurchasableRequest(request.status)) throw new PaymentConflict('Solicitud no disponible');
+    const limit = purchaseLimitForRequest(request, settingsOf(tenant.settings));
     const slot = await tx.serviceRequest.updateMany({
-      where: { id: request.id, tenantId, purchaseCount: { lt: limit }, status: { not: 'cancelled' } },
+      where: { id: request.id, tenantId, purchaseCount: { lt: limit }, status: { in: ['matching', 'contact_limit_open'] } },
       data: { purchaseCount: { increment: 1 } },
     });
     if (slot.count !== 1) throw new PaymentConflict('Cupo de profesionales agotado');

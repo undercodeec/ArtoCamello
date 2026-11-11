@@ -14,6 +14,11 @@ import { platformRouter } from './platform';
 import { PayPhoneProvider } from './payphoneProvider';
 import { kushkiWebhookRouter } from './kushkiWebhook';
 import { clearAuthAttempt, consumeAuthAttempt, pruneAuthAttempts } from './authThrottle';
+import { canonicalServiceCategories, hasServiceCategory } from './serviceCategories';
+import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isPurchasableRequest, purchaseLimitForRequest, toProfessionalPreview, validRequestFields } from './requestPolicy';
+import { CaptchaConfigurationError, verifyRecaptcha } from './captcha';
+import { createEmailVerificationToken, verifyEmailVerificationToken } from './emailVerification';
+import { escapeHtml } from './htmlEscape';
 
 dotenv.config();
 
@@ -68,6 +73,33 @@ async function tenantForHost(hostname: string): Promise<string | null> {
   return domain?.tenantId || null;
 }
 
+async function captchaPassed(req: Request, res: Response): Promise<boolean> {
+  const token = req.body?.captchaToken;
+  if (typeof token !== 'string' || !token.trim() || token.length > 4096) {
+    res.status(400).json({ error: 'Completa la verificación de seguridad.' });
+    return false;
+  }
+  try {
+    if (await verifyRecaptcha(token, req.hostname, req.ip)) return true;
+    res.status(403).json({ error: 'La verificación de seguridad no es válida o venció.' });
+  } catch (error) {
+    if (error instanceof CaptchaConfigurationError) res.status(503).json({ error: 'La verificación de seguridad no está disponible.' });
+    else throw error;
+  }
+  return false;
+}
+
+function validClientName(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length >= 3 && value.trim().length <= 100;
+}
+
+function validClientPhone(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const phone = value.trim();
+  const digits = phone.replace(/\D/g, '');
+  return phone.length <= 25 && /^\+?[0-9()\s-]+$/.test(phone) && digits.length >= 7 && digits.length <= 15;
+}
+
 // ====================================================================
 // RUTAS DE AUTENTICACIÓN
 // ====================================================================
@@ -83,6 +115,8 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['register-ip', tenantId, ip], 20, 3600000);
     if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos de registro' }); return; }
+    if (!await captchaPassed(req, res)) return;
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) { res.status(503).json({ error: 'La confirmación por correo no está disponible.' }); return; }
     const finalRole = 'guest'; // Siempre forzar guest al inicio
 
     const existingUser = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
@@ -93,6 +127,7 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const verification = createEmailVerificationToken();
     const result = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
@@ -101,55 +136,83 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
           fullName,
           role: finalRole,
           phone,
-          emailVerified: true,
+          emailVerified: false,
           tenantId,
         },
       });
-
+      await tx.emailVerificationToken.create({ data: { userId: newUser.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
       return newUser;
     });
 
-    /* Email-link verification was removed.
-    const verificationLink = '';
-    const safeName = fullName.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-    if (false) try {
+    try {
+      const baseUrl = await publicBaseUrl(prisma, tenantId, req.hostname);
+      const verificationUrl = new URL('/verificar-correo', baseUrl);
+      verificationUrl.hash = new URLSearchParams({ token: verification.token }).toString();
       await transporter.sendMail({
-        from: `"ArtoCamello Cuentas" <${process.env.SMTP_USER}>`,
-        to: email,
-        subject: 'Verifica tu cuenta en ArtoCamello',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-            <h1 style="color: #FFCA0C; font-size: 24px;">¡Bienvenido a ArtoCamello!</h1>
-            <p>Hola <b>${safeName}</b>,</p>
-            <p>Gracias por unirte. Para acceder a tu panel, verifica que este es tu correo.</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${verificationLink}" style="background-color: #101828; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">
-                Verificar mi cuenta
-              </a>
-            </div>
-            <p style="font-size: 14px; color: #666;">Si el botón no funciona, copia y pega este enlace:</p>
-            <p style="font-size: 14px; color: #1DBF73; word-break: break-all;">${verificationLink}</p>
-          </div>
-        `,
+        from: `"ArtoCamello Cuentas" <${smtpFrom()}>`,
+        to: result.email,
+        subject: 'Confirma tu correo en ArtoCamello',
+        text: `Hola ${result.fullName}, confirma tu correo en las pr?ximas 24 horas: ${verificationUrl.toString()}`,
+        html: `<p>Hola ${escapeHtml(result.fullName)},</p><p>Confirma tu correo en las pr?ximas 24 horas:</p><p><a href="${escapeHtml(verificationUrl.toString())}">Confirmar correo</a></p>`,
       });
-    } catch (emailErr) {
-      console.error('Error enviando correo de verificación:', emailErr);
+    } catch (error) {
+      console.error('Error enviando correo de verificaci?n:', error);
+      res.status(503).json({ error: 'No se pudo enviar la confirmaci?n por correo. Solicita un nuevo enlace.' });
+      return;
     }
-
-    */
-    const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = result;
-    const token = jwt.sign({ userId: result.id, role: result.role, email: result.email, sessionVersion: result.sessionVersion }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({
-      success: true,
-      message: 'Usuario registrado correctamente.',
-      requiresVerification: false,
-      user: userWithoutPassword,
-      token,
-    });
+    res.status(201).json({ success: true, message: 'Revisa tu correo para confirmar la cuenta.', requiresVerification: true });
   } catch (error) {
     console.error('Error in /register:', error);
     res.status(500).json({ error: 'Hubo un error en el servidor al intentar registrarte' });
   }
+});
+
+app.post('/api/auth/verify-email', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.body?.token;
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) { res.status(400).json({ error: 'Enlace inválido' }); return; }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const verification = await prisma.emailVerificationToken.findUnique({ where: { tokenHash }, include: { user: true } });
+    if (!verification || verification.user.tenantId !== tenantId || !verification.user.active || !verifyEmailVerificationToken(token, verification.tokenHash, verification.expiresAt)) {
+      res.status(400).json({ error: 'Enlace inválido o vencido' }); return;
+    }
+    const user = await prisma.$transaction(async tx => {
+      const consumed = await tx.emailVerificationToken.deleteMany({ where: { id: verification.id, tokenHash, expiresAt: { gt: new Date() } } });
+      if (!consumed.count) return null;
+      return tx.user.update({ where: { id: verification.userId }, data: { emailVerified: true } });
+    });
+    if (!user) { res.status(400).json({ error: 'Enlace ya utilizado' }); return; }
+    const { password: _password, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...safeUser } = user;
+    const sessionToken = jwt.sign({ userId: user.id, role: user.role, email: user.email, sessionVersion: user.sessionVersion }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(200).json({ user: safeUser, token: sessionToken });
+  } catch (error) { console.error('Error verifying email:', error); res.status(500).json({ error: 'Error al verificar el correo' }); }
+});
+
+app.post('/api/auth/resend-verification', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const email = req.body?.email;
+    if (typeof email !== 'string' || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { res.status(400).json({ error: 'Correo inválido' }); return; }
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['resend-email', tenantId, ip, email.trim().toLowerCase()], 3, 3600000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Espera antes de solicitar otro enlace' }); return; }
+    if (!await captchaPassed(req, res)) return;
+    const user = await prisma.user.findFirst({ where: { email: { equals: email.trim(), mode: 'insensitive' }, tenantId, emailVerified: false, active: true } });
+    if (user && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const verification = createEmailVerificationToken();
+      await prisma.emailVerificationToken.upsert({ where: { userId: user.id }, create: { userId: user.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt }, update: { tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
+      const baseUrl = await publicBaseUrl(prisma, tenantId, req.hostname);
+      const verificationUrl = new URL('/verificar-correo', baseUrl);
+      verificationUrl.hash = new URLSearchParams({ token: verification.token }).toString();
+      try {
+        await transporter.sendMail({ from: `"ArtoCamello Cuentas" <${smtpFrom()}>`, to: user.email, subject: 'Confirma tu correo en ArtoCamello', text: `Confirma tu correo en las próximas 24 horas: ${verificationUrl.toString()}` });
+      } catch (error) { console.error('Error enviando reenvío de verificación:', error); }
+    }
+    res.status(200).json({ success: true, message: 'Si la cuenta necesita confirmación, enviaremos un nuevo enlace.' });
+  } catch (error) { console.error('Error resending email verification:', error); res.status(500).json({ error: 'Error al solicitar el enlace' }); }
 });
 
 // 2. Login
@@ -181,6 +244,7 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    if (!user.emailVerified) { res.status(403).json({ error: 'Confirma tu correo antes de iniciar sesión', requiresVerification: true }); return; }
     await clearAuthAttempt(prisma, JWT_SECRET, ['login-account-ip', loginTenantId, ip, email.trim().toLowerCase()]);
 
     const { password: _, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...userWithoutPassword } = user;
@@ -220,7 +284,7 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response): Promi
     }
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) { res.status(503).json({ error: 'El envío de correo no está disponible temporalmente.' }); return; }
 
-    const user = await prisma.user.findFirst({ where: { tenantId, email: { equals: email.trim(), mode: 'insensitive' }, role: 'client', active: true, authProvider: 'local', password: { not: null } } });
+    const user = await prisma.user.findFirst({ where: { tenantId, email: { equals: email.trim(), mode: 'insensitive' }, role: 'client', active: true, emailVerified: true } });
     if (user) {
       const token = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -266,10 +330,10 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response): Promis
     const hashedPassword = await bcrypt.hash(password, 10);
     const changed = await prisma.$transaction(async tx => {
       const record = await tx.passwordResetToken.findUnique({ where: { tokenHash }, include: { user: true } });
-      if (!record || record.expiresAt <= new Date() || record.user.tenantId !== tenantId || record.user.role !== 'client' || !record.user.active || record.user.authProvider !== 'local' || !record.user.password) return false;
+      if (!record || record.expiresAt <= new Date() || record.user.tenantId !== tenantId || record.user.role !== 'client' || !record.user.active || !record.user.emailVerified) return false;
       const consumed = await tx.passwordResetToken.deleteMany({ where: { id: record.id, tokenHash, expiresAt: { gt: new Date() } } });
       if (consumed.count !== 1) return false;
-      await tx.user.update({ where: { id: record.userId }, data: { password: hashedPassword, sessionVersion: { increment: 1 } } });
+      await tx.user.update({ where: { id: record.userId }, data: { password: hashedPassword, authProvider: 'local', sessionVersion: { increment: 1 } } });
       return true;
     });
     if (!changed) { res.status(400).json({ error: 'El enlace no es válido o ya venció. Solicita uno nuevo.' }); return; }
@@ -435,7 +499,7 @@ const authenticateToken = (req: AuthRequest, res: Response, next: express.NextFu
     const claims = decoded as { userId?: string; sessionVersion?: number };
     if (!claims.userId) { res.status(403).json({ error: 'Token invalido' }); return; }
     prisma.user.findUnique({ where: { id: claims.userId } }).then(user => {
-      if (!user?.active || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión no disponible' }); return; }
+      if (!user?.active || !user.emailVerified || Number(claims.sessionVersion ?? 0) !== user.sessionVersion) { res.status(403).json({ error: 'Cuenta o sesión no disponible' }); return; }
       tenantForHost(req.hostname).then(tenantId => {
         if (!tenantId || tenantId !== user.tenantId) { res.status(403).json({ error: 'Tenant incorrecto' }); return; }
         req.user = { userId: user.id, role: user.role, email: user.email, tenantId };
@@ -452,7 +516,7 @@ const authenticateToken = (req: AuthRequest, res: Response, next: express.NextFu
 // 5. Establecer Rol en el Onboarding
 app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { role } = req.body;
+    const { role, fullName, phone } = req.body || {};
     const userId = req.user!.userId;
 
     if (role !== 'client' && role !== 'pro') {
@@ -468,13 +532,17 @@ app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Resp
       res.status(404).json({ error: 'Usuario no encontrado' });
       return;
     }
+    if (!user.active || !user.emailVerified) { res.status(403).json({ error: 'Confirma tu correo antes de continuar' }); return; }
     if (user.role !== 'guest' || user.clientProfile || user.professionalProfile) {
       res.status(409).json({ error: 'El rol ya fue definido' });
       return;
     }
+    if (role === 'client' && (!validClientName(fullName) || !validClientPhone(phone))) {
+      res.status(400).json({ error: 'Indica tu nombre completo y un teléfono válido para crear el perfil.' }); return;
+    }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
-      const claimed = await tx.user.updateMany({ where: { id: userId, role: 'guest' }, data: { role } });
+      const claimed = await tx.user.updateMany({ where: { id: userId, role: 'guest', active: true, emailVerified: true }, data: role === 'client' ? { role, fullName: fullName.trim(), phone: phone.trim() } : { role } });
       if (!claimed.count) return null;
       if (role === 'client') {
         await tx.clientProfile.create({ data: { userId, tenantId: req.user!.tenantId } });
@@ -513,35 +581,48 @@ app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Resp
 app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (req.user!.role !== 'client') { res.status(403).json({ error: 'Solo los clientes pueden crear solicitudes.' }); return; }
-    const {
-      categorySlug, title, description, location,
-      urgency, preferredDate, contactPhone, contactEmail, contactName, estimatedBudget,
-    } = req.body;
-
-    if (!estimatedBudget || estimatedBudget <= 0) {
-      res.status(400).json({ error: 'Debes indicar un presupuesto estimado mayor a 0.' });
-      return;
+    const body = req.body || {};
+    if (!['direct', 'marketplace'].includes(body.visibility) || !validRequestFields(body)
+      || (body.visibility === 'direct' ? typeof body.targetProfessionalUserId !== 'string' : body.targetProfessionalUserId != null)) {
+      res.status(400).json({ error: 'Datos de solicitud inválidos' }); return;
     }
-
-    const newRequest = await prisma.serviceRequest.create({
-      data: {
-        tenantId: req.user!.tenantId,
-        clientId: req.user!.userId,
-        categorySlug,
-        title,
-        description,
-        location,
-        urgency,
-        preferredDate: preferredDate ? new Date(preferredDate) : null,
-        status: 'contact_limit_open',
-        contactPhone,
-        contactEmail,
-        contactName: typeof contactName === 'string' ? contactName.trim().slice(0, 100) || null : null,
-        estimatedBudget: parseFloat(estimatedBudget),
-      },
+    const owner = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { emailVerified: true } });
+    if (!owner?.emailVerified) { res.status(403).json({ error: 'Verifica tu correo antes de publicar' }); return; }
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const userLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-user', req.user!.tenantId, req.user!.userId], 20, 3600000);
+    const ipLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-ip', req.user!.tenantId, ip], 60, 3600000);
+    if (!userLimit.allowed || !ipLimit.allowed) { res.setHeader('Retry-After', String(Math.max(userLimit.retryAfterSeconds, ipLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiadas solicitudes. Intenta más tarde.' }); return; }
+    if (!await captchaPassed(req, res)) return;
+    if (body.visibility === 'direct') {
+      const target = await prisma.user.findFirst({ where: { id: body.targetProfessionalUserId, tenantId: req.user!.tenantId, role: 'pro', active: true, emailVerified: true }, include: { professionalProfile: true } });
+      if (!target?.professionalProfile?.verified || !hasServiceCategory(target.professionalProfile.categories, body.categorySlug)) {
+        res.status(404).json({ error: 'Profesional no disponible para esta categoría' }); return;
+      }
+    }
+    const key = req.header('idempotency-key');
+    if (key && (body.visibility !== 'marketplace' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key))) {
+      res.status(400).json({ error: 'Idempotency-Key inválida' }); return;
+    }
+    const fields = { visibility: body.visibility, targetProfessionalUserId: body.visibility === 'direct' ? body.targetProfessionalUserId : null,
+      categorySlug: body.categorySlug.trim(), title: body.title.trim(), description: body.description.trim(), city: body.city.trim(), location: body.location.trim(),
+      urgency: body.urgency, preferredDate: body.preferredDate ? new Date(body.preferredDate) : null,
+      contactPhone: body.contactPhone.trim(), contactEmail: body.contactEmail.trim(), contactName: body.contactName?.trim() || null,
+      estimatedBudget: Number(body.estimatedBudget) };
+    const hash = crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+    const result = await prisma.$transaction(async tx => {
+      if (key) {
+        await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${req.user!.userId}:${key}`}))`;
+        const previous = await tx.serviceRequest.findFirst({ where: { tenantId: req.user!.tenantId, clientId: req.user!.userId, idempotencyKey: key } });
+        if (previous) return { previous };
+      }
+      const created = await tx.serviceRequest.create({ data: { ...fields, tenantId: req.user!.tenantId, clientId: req.user!.userId, status: 'contact_limit_open', idempotencyKey: key || null, payloadHash: key ? hash : null } });
+      return { created };
     });
-
-    res.status(201).json(newRequest);
+    if ('previous' in result) {
+      if (result.previous!.payloadHash !== hash) { res.status(409).json({ error: 'Clave de idempotencia ya utilizada con otro contenido' }); return; }
+      res.status(200).json(result.previous); return;
+    }
+    res.status(201).json(result.created);
   } catch (error) {
     console.error('Error creating request:', error);
     res.status(500).json({ error: 'Error al crear la petición' });
@@ -556,12 +637,74 @@ app.get('/api/requests/client', authenticateToken, async (req: AuthRequest, res:
       orderBy: { createdAt: 'desc' },
     });
     const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
-    const maxProfessionalsPerLead = settingsOf(tenant.settings).maxProfessionalsPerLead;
-    res.status(200).json(requests.map(request => ({ ...request, maxProfessionalsPerLead })));
+    const purchaseIds = (await prisma.leadPurchase.findMany({ where: { requestId: { in: requests.map(item => item.id) } }, select: { id: true } })).map(item => item.id);
+    const active = purchaseIds.length ? await prisma.payment.findMany({ where: { tenantId: req.user!.tenantId, OR: purchaseIds.map(id => ({ metadata: { path: ['leadPurchaseId'], equals: id } })), status: { in: ['created', 'awaiting_transfer', 'pending_provider', 'under_review', 'approved'] } }, select: { metadata: true, status: true, expiresAt: true } }) : [];
+    const activeRequestIds = new Set(active.filter(payment => ['under_review', 'approved'].includes(payment.status) || !payment.expiresAt || payment.expiresAt > new Date()).map(payment => (payment.metadata as { requestId?: string }).requestId));
+    res.status(200).json(requests.map(request => ({ ...request, maxProfessionalsPerLead: purchaseLimitForRequest(request, settingsOf(tenant.settings)), canEdit: request.visibility === 'marketplace' && isOpenRequest(request.status) && request.purchaseCount === 0 && !activeRequestIds.has(request.id) })));
   } catch (error) {
     console.error('Error getting client requests:', error);
     res.status(500).json({ error: 'Error al obtener peticiones' });
   }
+});
+
+/** Public marketplace summary for visitors deciding whether to join as a professional. */
+app.get('/api/requests/public', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tenantId = await tenantForHost(req.hostname);
+    if (!tenantId) { res.status(404).end(); return; }
+    const requests = await prisma.serviceRequest.findMany({
+      where: {
+        tenantId,
+        visibility: 'marketplace',
+        status: { in: ['contact_limit_open', 'matching'] },
+      },
+      select: {
+        id: true,
+        categorySlug: true,
+        city: true,
+        urgency: true,
+        estimatedBudget: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    res.status(200).json(requests.map(request => ({
+      ...request,
+      title: `Servicio de ${request.categorySlug}`,
+    })));
+  } catch (error) {
+    console.error('Error getting public requests:', error);
+    res.status(500).json({ error: 'Error al obtener solicitudes públicas' });
+  }
+});
+
+app.patch('/api/requests/:id', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user!.role !== 'client') { res.status(403).json({ error: 'No autorizado' }); return; }
+    const allowed = ['title', 'description', 'city', 'location', 'preferredDate', 'urgency', 'estimatedBudget', 'contactName', 'contactEmail', 'contactPhone'];
+    const input = req.body || {};
+    if (!Object.keys(input).length || Object.keys(input).some(key => !allowed.includes(key))) { res.status(400).json({ error: 'Campos inválidos' }); return; }
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${req.params.id}`}))`;
+      const current = await tx.serviceRequest.findFirst({ where: { id: req.params.id, tenantId: req.user!.tenantId, clientId: req.user!.userId } });
+      if (!current) return { status: 404, error: 'Solicitud no encontrada' };
+      if (current.visibility !== 'marketplace' || !isOpenRequest(current.status) || current.purchaseCount !== 0) return { status: 409, error: 'Solicitud no editable' };
+      const purchases = await tx.leadPurchase.findMany({ where: { requestId: current.id }, select: { id: true } });
+      for (const purchase of purchases) {
+        const active = await tx.payment.findFirst({ where: { tenantId: current.tenantId, metadata: { path: ['leadPurchaseId'], equals: purchase.id }, OR: [{ status: { in: ['under_review', 'approved'] } }, { status: { in: ['created', 'awaiting_transfer', 'pending_provider'] }, expiresAt: { gt: new Date() } }] } });
+        if (active) return { status: 409, error: 'Hay un pago en proceso' };
+      }
+      if (!validRequestFields({ ...current, ...input })) return { status: 400, error: 'Datos de solicitud inválidos' };
+      const data: Record<string, unknown> = {};
+      for (const field of Object.keys(input)) data[field] = field === 'estimatedBudget' ? Number(input[field]) : field === 'preferredDate' ? (input[field] ? new Date(input[field]) : null) : typeof input[field] === 'string' ? input[field].trim() : input[field];
+      const changed = await tx.serviceRequest.updateMany({ where: { id: current.id, tenantId: current.tenantId, clientId: current.clientId, purchaseCount: 0, status: { in: [...OPEN_REQUEST_STATUSES] } }, data });
+      if (!changed.count) return { status: 409, error: 'Solicitud no editable' };
+      return { updated: await tx.serviceRequest.findUniqueOrThrow({ where: { id: current.id } }) };
+    });
+    if ('error' in result) { res.status(result.status || 409).json({ error: result.error }); return; }
+    res.status(200).json(result.updated);
+  } catch (error) { console.error('Error editing request:', error); res.status(500).json({ error: 'Error al editar solicitud' }); }
 });
 
 // 8. Peticiones Disponibles para Profesionales — incluye costUSD calculado
@@ -571,19 +714,17 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
       where: { id: req.user?.userId },
       include: { professionalProfile: true },
     });
-    if (requestingUser?.role !== 'pro' || !requestingUser.professionalProfile) {
+    if (requestingUser?.role !== 'pro' || !requestingUser.active || !requestingUser.emailVerified || !requestingUser.professionalProfile?.verified) {
       res.status(403).json({ error: 'No autorizado' });
       return;
     }
     const realProfId = requestingUser.professionalProfile.id;
 
     const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
-    const maxProfessionals = settingsOf(tenant.settings).maxProfessionalsPerLead;
     const requests = await prisma.serviceRequest.findMany({
       where: {
         tenantId: req.user!.tenantId,
         status: { in: ['contact_limit_open', 'matching'] },
-        purchaseCount: { lt: maxProfessionals },
         leadPurchases: {
           none: { professionalId: realProfId, status: 'paid' },
         },
@@ -592,16 +733,13 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
     });
 
     const categories = requestingUser.professionalProfile.categories;
-    const filtered = categories.length > 0
-      ? requests.filter((r) => categories.includes(r.categorySlug))
-      : requests;
+    const filtered = requests.filter(r => canProfessionalAccessRequest(r, requestingUser.id, categories, req.user!.tenantId)
+      && r.purchaseCount < purchaseLimitForRequest(r, settingsOf(tenant.settings)));
 
     // Añadir costUSD calculado para que el frontend lo muestre sin lógica de negocio
-    const enriched = filtered.map(({ contactPhone: _phone, contactEmail: _email, contactName: _name, ...r }) => ({
-      ...r,
-      maxProfessionalsPerLead: maxProfessionals,
-      costUSD: leadAmount(r.estimatedBudget, settingsOf(tenant.settings)).toNumber(),
-    }));
+    const enriched = filtered.map(r => toProfessionalPreview(r,
+      leadAmount(r.estimatedBudget, settingsOf(tenant.settings)).toNumber(),
+      purchaseLimitForRequest(r, settingsOf(tenant.settings))));
 
     res.status(200).json(enriched);
   } catch (error) {
@@ -628,7 +766,7 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
       include: { professionalProfile: true },
     });
 
-    if (requestingUser?.role !== 'pro' || !requestingUser.professionalProfile) {
+    if (requestingUser?.role !== 'pro' || !requestingUser.active || !requestingUser.emailVerified || !requestingUser.professionalProfile?.verified) {
       res.status(403).json({ error: 'Sólo perfiles profesionales pueden comprar contactos.' });
       return;
     }
@@ -643,22 +781,27 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
       res.status(404).json({ error: 'Solicitud no encontrada.' });
       return;
     }
-    if (!['matching', 'contact_limit_open'].includes(request.status)) {
+    if (!canProfessionalAccessRequest(request, requestingUser.id, requestingUser.professionalProfile.categories, req.user!.tenantId)) {
+      res.status(403).json({ error: 'Selecciona este servicio en tu perfil antes de comprar el contacto.' });
+      return;
+    }
+    if (!isPurchasableRequest(request.status)) {
       res.status(409).json({ error: 'Esta solicitud ya no está disponible para comprar contactos.' });
       return;
     }
     const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
     const tenantSettings = settingsOf(tenant.settings);
-    if (request.purchaseCount >= tenantSettings.maxProfessionalsPerLead) {
-      res.status(400).json({ error: `Límite de ${tenantSettings.maxProfessionalsPerLead} profesionales alcanzado.` });
+    if (request.purchaseCount >= purchaseLimitForRequest(request, tenantSettings)) {
+      res.status(400).json({ error: 'Límite de profesionales alcanzado.' });
       return;
     }
 
     const initiated = await prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${requestId}:${req.user!.userId}`}))`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${requestId}`}))`;
       const currentRequest = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
-      if (!currentRequest || !['matching', 'contact_limit_open'].includes(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 409 };
-      if (currentRequest.purchaseCount >= tenantSettings.maxProfessionalsPerLead) return { error: 'Cupo de profesionales agotado', statusCode: 409 };
+      if (!currentRequest || !isPurchasableRequest(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 409 };
+      if (!canProfessionalAccessRequest(currentRequest, requestingUser.id, requestingUser.professionalProfile!.categories, req.user!.tenantId)) return { error: 'Solicitud no disponible', statusCode: 403 };
+      if (currentRequest.purchaseCount >= purchaseLimitForRequest(currentRequest, tenantSettings)) return { error: 'Cupo de profesionales agotado', statusCode: 409 };
       const existing = await tx.leadPurchase.findUnique({ where: { requestId_professionalId: { requestId, professionalId: realProfId } } });
       if (existing?.status === 'paid') return { error: 'Ya has comprado este contacto', statusCode: 409 };
       if (existing) {
@@ -911,6 +1054,11 @@ app.get('/api/payments/history', authenticateToken, async (req: AuthRequest, res
 app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { requestId, message, estimatedPrice, estimatedDays } = req.body;
+    if (typeof requestId !== 'string' || typeof message !== 'string' || !message.trim() || message.length > 5000
+      || !Number.isFinite(Number(estimatedPrice)) || Number(estimatedPrice) <= 0 || Number(estimatedPrice) > 1_000_000
+      || (estimatedDays != null && (!Number.isInteger(Number(estimatedDays)) || Number(estimatedDays) <= 0 || Number(estimatedDays) > 3650))) {
+      res.status(400).json({ error: 'Cotización inválida' }); return;
+    }
     
     const user = await prisma.user.findUnique({
       where: { id: req.user!.userId },
@@ -931,27 +1079,21 @@ app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Respons
       return;
     }
 
-    // Upsert quote
-    const quote = await prisma.quote.upsert({
-      where: {
-        requestId_professionalId: { requestId, professionalId: realProfId }
-      },
-      update: {
-        message,
-        estimatedPrice: parseFloat(estimatedPrice),
-        estimatedDays: estimatedDays ? parseInt(estimatedDays) : null,
-      },
-      create: {
-        tenantId: req.user!.tenantId,
-        requestId,
-        professionalId: realProfId,
-        message,
-        estimatedPrice: parseFloat(estimatedPrice),
-        estimatedDays: estimatedDays ? parseInt(estimatedDays) : null,
-      }
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${requestId}`}))`;
+      const request = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
+      if (!request || !isOpenRequest(request.status)) return { error: 'Solicitud cerrada' };
+      const existingQuote = await tx.quote.findUnique({ where: { requestId_professionalId: { requestId, professionalId: realProfId } } });
+      if (existingQuote && existingQuote.status !== 'sent') return { error: 'Cotización cerrada' };
+      const quote = await tx.quote.upsert({
+        where: { requestId_professionalId: { requestId, professionalId: realProfId } },
+        update: { message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
+        create: { tenantId: req.user!.tenantId, requestId, professionalId: realProfId, message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
+      });
+      return { quote };
     });
-
-    res.status(200).json(quote);
+    if ('error' in result) { res.status(409).json({ error: result.error }); return; }
+    res.status(200).json(result.quote);
   } catch (error) {
     console.error('Error in POST /api/quotes:', error);
     res.status(500).json({ error: 'Error al enviar cotización.' });
@@ -1052,12 +1194,16 @@ app.post('/api/quotes/:id/accept', authenticateToken, async (req: AuthRequest, r
       return;
     }
 
-    await prisma.$transaction(async (tx) => {
+    const accepted = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${quote.requestId}`}))`;
+      const changed = await tx.serviceRequest.updateMany({ where: { id: quote.requestId, tenantId: req.user!.tenantId, status: { in: ['contact_limit_open', 'contact_limit_reached', 'quotes_received'] } }, data: { status: 'hired' } });
+      if (!changed.count) return false;
       // Marcar la aceptada
-      await tx.quote.update({
-        where: { id },
+      const quoteChanged = await tx.quote.updateMany({
+        where: { id, status: 'sent' },
         data: { status: 'accepted' }
       });
+      if (!quoteChanged.count) throw new PaymentConflict('Cotización no disponible');
 
       // Rechazar las demás
       await tx.quote.updateMany({
@@ -1065,15 +1211,12 @@ app.post('/api/quotes/:id/accept', authenticateToken, async (req: AuthRequest, r
         data: { status: 'rejected' }
       });
 
-      // Actualizar request
-      await tx.serviceRequest.update({
-        where: { id: quote.requestId },
-        data: { status: 'hired', updatedAt: new Date() }
-      });
+      return true;
     });
-
+    if (!accepted) { res.status(409).json({ error: 'Solicitud no disponible' }); return; }
     res.status(200).json({ success: true });
   } catch (error) {
+    if (error instanceof PaymentConflict) { res.status(409).json({ error: error.message }); return; }
     console.error('Error in POST /api/quotes/accept:', error);
     res.status(500).json({ error: 'Error al aceptar cotización.' });
   }
@@ -1093,10 +1236,12 @@ app.post('/api/requests/:id/cancel', authenticateToken, async (req: AuthRequest,
       return;
     }
 
-    const updated = await prisma.serviceRequest.update({
-      where: { id },
-      data: { status: 'cancelled', updatedAt: new Date() }
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${id}`}))`;
+      const changed = await tx.serviceRequest.updateMany({ where: { id, tenantId: req.user!.tenantId, clientId: req.user!.userId, status: { in: [...OPEN_REQUEST_STATUSES] } }, data: { status: 'cancelled' } });
+      return changed.count ? tx.serviceRequest.findUniqueOrThrow({ where: { id } }) : null;
     });
+    if (!updated) { res.status(409).json({ error: 'Solicitud no cancelable' }); return; }
     
     res.status(200).json(updated);
   } catch (error) {
@@ -1115,10 +1260,9 @@ app.post('/api/requests/:id/complete', authenticateToken, async (req: AuthReques
       return;
     }
 
-    const updated = await prisma.serviceRequest.update({
-      where: { id },
-      data: { status: 'completed', updatedAt: new Date() }
-    });
+    const changed = await prisma.serviceRequest.updateMany({ where: { id, tenantId: req.user!.tenantId, clientId: req.user!.userId, status: 'hired' }, data: { status: 'completed' } });
+    if (!changed.count) { res.status(409).json({ error: 'Solicitud no contratada' }); return; }
+    const updated = await prisma.serviceRequest.findUniqueOrThrow({ where: { id } });
     
     res.status(200).json(updated);
   } catch (error) {
@@ -1199,6 +1343,13 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
       return;
     }
 
+    const validCategories = categories === undefined || (Array.isArray(categories) && categories.length > 0 && categories.length <= 20 && categories.every((value: unknown) => typeof value === 'string' && value.trim().length > 0 && value.length <= 100));
+    if (!validCategories) {
+      res.status(400).json({ error: 'Selecciona al menos un servicio válido.' });
+      return;
+    }
+    const selectedCategories = categories === undefined ? undefined : canonicalServiceCategories(categories as string[]);
+
     // Actualizar datos básicos del User
     const updatedUser = await prisma.user.update({
       where: { id: userId },
@@ -1217,7 +1368,7 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
         data: {
           ...(businessName !== undefined && { businessName }),
           ...(bio !== undefined && { bio }),
-          ...(categories !== undefined && { categories }),
+          ...(selectedCategories !== undefined && { categories: selectedCategories }),
           ...(serviceZones !== undefined && { serviceZones }),
           ...(experienceYears !== undefined && { experienceYears: parseInt(experienceYears) }),
           ...(portfolioImages !== undefined && { portfolioImages }),
@@ -1299,6 +1450,9 @@ app.put('/api/client/profile', authenticateToken, async (req: AuthRequest, res: 
       res.status(403).json({ error: 'Solo clientes pueden actualizar este perfil.' });
       return;
     }
+    if ((fullName !== undefined && !validClientName(fullName)) || (phone !== undefined && !validClientPhone(phone))) {
+      res.status(400).json({ error: 'Indica tu nombre completo y un teléfono válido.' }); return;
+    }
 
     // Actualizar datos básicos del User
     const updatedUser = await prisma.user.update({
@@ -1331,6 +1485,63 @@ app.put('/api/client/profile', authenticateToken, async (req: AuthRequest, res: 
   } catch (error) {
     console.error('Error in PUT /api/client/profile:', error);
     res.status(500).json({ error: 'Error al guardar el perfil.' });
+  }
+});
+
+/** Closes a client account and removes its personal profile and request contact data. */
+app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const password = req.body?.password;
+    if (typeof password !== 'string' || !password || password.length > 128 || req.body?.confirmation !== 'ELIMINAR') {
+      res.status(400).json({ error: 'Escribe ELIMINAR y tu contrasena actual para confirmar.' }); return;
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!user || user.role !== 'client' || user.tenantId !== req.user!.tenantId) {
+      res.status(403).json({ error: 'Solo clientes pueden eliminar su cuenta desde esta ruta.' }); return;
+    }
+    if (!user.password || user.authProvider !== 'local') {
+      res.status(409).json({ error: 'Esta cuenta no tiene una contrasena local. Contacta a soporte para eliminarla.' }); return;
+    }
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['delete-account', user.id, req.ip || 'unknown'], 5, 15 * 60000);
+    if (!limit.allowed) {
+      res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos. Intenta de nuevo mas tarde.' }); return;
+    }
+    if (!await bcrypt.compare(password, user.password)) {
+      res.status(401).json({ error: 'La contrasena actual no es correcta.' }); return;
+    }
+
+    await prisma.$transaction(async tx => {
+      const changed = await tx.user.updateMany({
+        where: { id: user.id, tenantId: user.tenantId, role: 'client', active: true },
+        data: {
+          active: false, sessionVersion: { increment: 1 }, emailVerified: false,
+          email: `deleted-${user.id}@invalid.local`, fullName: 'Cuenta eliminada', phone: null,
+          password: null, avatarUrl: null, verificationToken: null,
+          mfaSecret: null, mfaPendingSecret: null, mfaRecoveryHashes: [], mfaLastCounter: -1,
+          mfaFailureCount: 0, mfaLockedUntil: null,
+        },
+      });
+      if (!changed.count) throw new Error('ACCOUNT_ALREADY_CLOSED');
+      await tx.clientProfile.deleteMany({ where: { userId: user.id, tenantId: user.tenantId } });
+      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
+      await tx.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+      await tx.review.deleteMany({ where: { clientId: user.id, tenantId: user.tenantId } });
+      await tx.serviceRequest.updateMany({
+        where: { clientId: user.id, tenantId: user.tenantId },
+        data: {
+          status: 'cancelled', title: 'Solicitud de cuenta eliminada', description: '',
+          location: '', city: null, contactName: null, contactPhone: '', contactEmail: '',
+          preferredDate: null, idempotencyKey: null, payloadHash: null,
+        },
+      });
+    });
+    res.status(200).json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'ACCOUNT_ALREADY_CLOSED') {
+      res.status(409).json({ error: 'La cuenta ya fue eliminada.' }); return;
+    }
+    console.error('Error in DELETE /api/client/account:', error);
+    res.status(500).json({ error: 'No se pudo eliminar la cuenta.' });
   }
 });
 
@@ -1385,7 +1596,7 @@ app.get('/api/professionals', async (req: Request, res: Response): Promise<void>
     const tenantId = await tenantForHost(req.hostname);
     if (!tenantId) { res.status(404).end(); return; }
     const pros = await prisma.user.findMany({
-      where: { role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true } },
+      where: { role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true, categories: { isEmpty: false } } },
       select: { id: true, fullName: true, avatarUrl: true, createdAt: true, professionalProfile: { select: {
         id: true, businessName: true, bio: true, categories: true, serviceZones: true,
         experienceYears: true, portfolioImages: true, skills: true, city: true,
@@ -1411,7 +1622,7 @@ app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<v
     const tenantId = await tenantForHost(req.hostname);
     if (!tenantId) { res.status(404).end(); return; }
     const user = await prisma.user.findFirst({
-      where: { id: id, role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true } },
+      where: { id: id, role: 'pro', tenantId, active: true, professionalProfile: { tenantId, verified: true, categories: { isEmpty: false } } },
       select: {
         id: true, fullName: true, avatarUrl: true, createdAt: true,
         professionalProfile: { select: {
@@ -1543,7 +1754,7 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
   try {
     const { preference, enabled, label } = req.body;
 
-    if (!preference || typeof enabled !== 'boolean') {
+    if (!['emailQuotes', 'emailMessages', 'emailPromos', 'notif-new-jobs', 'notif-client-msgs', 'notif-newsletter'].includes(preference) || typeof enabled !== 'boolean' || typeof label !== 'string' || label.length > 100) {
       res.status(400).json({ error: 'Datos de preferencia inválidos.' });
       return;
     }
@@ -1555,6 +1766,11 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
     }
 
     // Solo enviar correo cuando se ACTIVA la notificación
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['notification-email', req.user!.tenantId, req.user!.userId, ip], 10, 3600000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiadas solicitudes' }); return; }
+    const safeLabel = escapeHtml(label);
+    const safeName = escapeHtml(user.fullName);
     if (enabled) {
       const statusText = 'activada';
       const statusColor = '#16a34a';
@@ -1585,7 +1801,7 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
                   Notificación ${statusText}
                 </h2>
                 <p style="color: #6b7280; font-size: 15px; text-align: center; margin-bottom: 30px;">
-                  Hola <strong>${user.fullName}</strong>, te confirmamos que tu preferencia ha sido actualizada.
+                  Hola <strong>${safeName}</strong>, te confirmamos que tu preferencia ha sido actualizada.
                 </p>
 
                 <!-- Preference Card -->
@@ -1594,7 +1810,7 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
                     <tr>
                       <td style="padding: 8px 0;">
                         <span style="color: #6b7280; font-size: 13px;">Preferencia</span><br/>
-                        <strong style="color: #101828; font-size: 15px;">${label}</strong>
+                        <strong style="color: #101828; font-size: 15px;">${safeLabel}</strong>
                       </td>
                       <td style="text-align: right; vertical-align: middle;">
                         <span style="background: ${statusColor}; color: white; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;">

@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { allocateLead, PaymentConflict, settingsOf } from './payments';
+import { canonicalServiceCategories } from './serviceCategories';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
@@ -239,7 +240,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     if (search) filters.push({ OR: [{ fullName: { contains: search, mode: 'insensitive' } }, { email: { contains: search, mode: 'insensitive' } }] });
     const where: Prisma.UserWhereInput = { AND: filters };
-    const [items, total] = await Promise.all([db.user.findMany({ where, ...page(req), orderBy: { createdAt: 'desc' }, select: { id: true, email: true, fullName: true, role: true, active: true, emailVerified: true, createdAt: true, professionalProfile: { select: { verified: true } }, _count: { select: { serviceRequests: true } } } }), db.user.count({ where })]);
+    const [items, total] = await Promise.all([db.user.findMany({ where, ...page(req), orderBy: { createdAt: 'desc' }, select: { id: true, email: true, fullName: true, role: true, active: true, emailVerified: true, createdAt: true, professionalProfile: { select: { verified: true, categories: true } }, _count: { select: { serviceRequests: true } } } }), db.user.count({ where })]);
     res.json({ items, total });
   }));
   router.get('/users/:id', allow('users.read'), wrap(async (req, res) => {
@@ -247,7 +248,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const user = await db.user.findFirst({ where: { id: req.params.id, tenantId: c.tenantId }, select: {
       id: true, email: true, fullName: true, phone: true, role: true, active: true, emailVerified: true, createdAt: true,
       clientProfile: { select: { addresses: true, preferredCategories: true } },
-      professionalProfile: { select: { id: true, businessName: true, bio: true, categories: true, serviceZones: true, city: true, verified: true, documentType: true, ...(c.permissions.has('professionals.verify') ? { documentId: true } : {}) } },
+      professionalProfile: { select: { id: true, businessName: true, bio: true, categories: true, skills: true, serviceZones: true, city: true, experienceYears: true, verified: true, documentType: true, ...(c.permissions.has('professionals.verify') ? { documentId: true } : {}) } },
       serviceRequests: { where: { tenantId: c.tenantId }, select: { id: true, title: true, status: true, createdAt: true }, take: 20, orderBy: { createdAt: 'desc' } },
     } });
     if (!user) { res.status(404).end(); return; }
@@ -273,6 +274,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (typeof verified !== 'boolean') { res.status(400).json({ error: 'verified requerido' }); return; }
     const profile = await db.professionalProfile.findFirst({ where: { userId: req.params.id, user: { tenantId: c.tenantId } } });
     if (!profile) { res.status(404).end(); return; }
+    if (verified && canonicalServiceCategories(profile.categories).length === 0) { res.status(409).json({ error: 'El profesional debe seleccionar al menos un servicio antes de verificar su perfil.' }); return; }
     await db.$transaction(async tx => { await tx.professionalProfile.update({ where: { id: profile.id }, data: { verified } }); await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'professionals.verify', entityType: 'ProfessionalProfile', entityId: profile.id, before: { verified: profile.verified }, after: { verified }, ip: req.ip } }); });
     res.json({ verified });
   }));

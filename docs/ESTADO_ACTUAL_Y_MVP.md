@@ -2,6 +2,10 @@
 
 Actualizado: 5 de octubre de 2026. Este documento describe el código presente en este repositorio y separa lo implementado de las decisiones comerciales previstas. Para operar el panel, consulta también [ADMIN_OPERACION.md](../ADMIN_OPERACION.md); para requisitos de salida a producción, [PRODUCTION_CHECKLIST.md](../server/docs/PRODUCTION_CHECKLIST.md).
 
+## Actualización del 10 de noviembre de 2026
+
+El cliente ya puede publicar una necesidad general desde `Mis Solicitudes`, además de solicitar directamente a un profesional desde su perfil. El servidor limita las solicitudes dirigidas al destinatario, filtra las publicaciones generales por categoría y tenant y solo entrega datos privados después de asignar una compra. Las solicitudes históricas sin destinatario verificado están en cuarentena. El registro nuevo requiere confirmación por correo y reCAPTCHA; estas funciones necesitan claves, SMTP y dominios configurados antes de usarse en producción. El resto del documento conserva el alcance comercial del MVP y puede contener referencias técnicas previas a esta actualización.
+
 ## 1. Qué vende ArtoCamello
 
 ArtoCamello conecta personas que necesitan un servicio con profesionales que quieren contactarles. El cliente publica una solicitud sin pagar a ArtoCamello. El profesional examina oportunidades y paga a ArtoCamello por **desbloquear los datos de contacto de una solicitud**. Ese cobro no es el precio del trabajo. Tras el contacto, el profesional puede enviar una cotización y el cliente elegirla. El pago del trabajo entre cliente y profesional, las liquidaciones al profesional y la facturación electrónica no forman parte de este MVP.

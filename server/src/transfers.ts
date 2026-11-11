@@ -9,6 +9,8 @@ import path from 'path';
 import { leadAmount, publicBaseUrl, settingsOf, TenantSettings } from './payments';
 import { TransferProvider } from './paymentProvider';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
+import { hasServiceCategory } from './serviceCategories';
+import { canProfessionalAccessRequest, isPurchasableRequest, purchaseLimitForRequest } from './requestPolicy';
 
 type PayerRequest = Request & { payer?: { userId: string; tenantId: string } };
 const run = promisify(execFile);
@@ -39,13 +41,15 @@ export function transferRouter(db: PrismaClient, secret: string) {
       db.serviceRequest.findFirst({ where: { id: requestId, tenantId } }),
       db.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
     ]);
-    if (!user?.professionalProfile || !request || !['matching','contact_limit_open'].includes(request.status)) { res.status(404).json({ error: 'Solicitud no disponible' }); return; }
+    if (!user?.active || !user.emailVerified || !user.professionalProfile?.verified || !request || !isPurchasableRequest(request.status)) { res.status(404).json({ error: 'Solicitud no disponible' }); return; }
+    if (!canProfessionalAccessRequest(request, userId, user.professionalProfile.categories, tenantId)) { res.status(403).json({ error: 'Solicitud no disponible' }); return; }
     const settings = settingsOf(tenant.settings);
     const result = await db.$transaction(async tx => {
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${tenantId}:${requestId}:${userId}`}))`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${tenantId}:${requestId}`}))`;
       const currentRequest = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId } });
-      if (!currentRequest || !['matching', 'contact_limit_open'].includes(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 404 };
-      if (currentRequest.purchaseCount >= settings.maxProfessionalsPerLead) return { error: 'Cupo agotado', statusCode: 409 };
+      if (!currentRequest || !isPurchasableRequest(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 404 };
+      if (!canProfessionalAccessRequest(currentRequest, userId, user.professionalProfile!.categories, tenantId)) return { error: 'Solicitud no disponible', statusCode: 403 };
+      if (currentRequest.purchaseCount >= purchaseLimitForRequest(currentRequest, settings)) return { error: 'Cupo agotado', statusCode: 409 };
       const existing = await tx.leadPurchase.findUnique({ where: { requestId_professionalId: { requestId, professionalId: user.professionalProfile!.id } } });
       if (existing?.status === 'paid') return { error: 'Contacto ya comprado', statusCode: 409 };
       const active = existing ? await tx.payment.findFirst({ where: { tenantId, metadata: { path: ['leadPurchaseId'], equals: existing.id }, method: 'transfer', OR: [{ status: 'under_review' }, { status: 'awaiting_transfer', expiresAt: { gt: new Date() } }] }, orderBy: { createdAt: 'desc' } }) : null;
@@ -77,9 +81,10 @@ export function transferRouter(db: PrismaClient, secret: string) {
     ]);
     const settings = settingsOf(tenant.settings);
     const config = kushkiConfigFor(tenantId);
+    if (!user?.active || !user.emailVerified || !user.professionalProfile?.verified || !request || !isPurchasableRequest(request.status)) { res.status(404).json({ error: 'Solicitud no disponible' }); return; }
+    if (!canProfessionalAccessRequest(request, userId, user.professionalProfile.categories, tenantId)) { res.status(403).json({ error: 'Solicitud no disponible' }); return; }
+    if (request.purchaseCount >= purchaseLimitForRequest(request, settings)) { res.status(409).json({ error: 'Cupo agotado' }); return; }
     if (!settings.cardEnabled || !config) { res.status(503).json({ error: 'Tarjeta no habilitada para este tenant' }); return; }
-    if (!user?.professionalProfile || !request || !['matching', 'contact_limit_open'].includes(request.status)) { res.status(404).json({ error: 'Solicitud no disponible' }); return; }
-    if (request.purchaseCount >= settings.maxProfessionalsPerLead) { res.status(409).json({ error: 'Cupo agotado' }); return; }
     const reference = `AC-K-${crypto.createHash('sha256').update(`${tenantId}|${userId}|${idempotencyKey}`).digest('hex').slice(0, 32).toUpperCase()}`;
     const prior = await db.payment.findUnique({ where: { tenantId_reference: { tenantId, reference } } });
     if (prior) {
@@ -89,9 +94,11 @@ export function transferRouter(db: PrismaClient, secret: string) {
     }
     const amount = leadAmount(request.estimatedBudget, settings);
     const result = await db.$transaction(async tx => {
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${tenantId}:${requestId}:${userId}`}))`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${tenantId}:${requestId}`}))`;
       const same = await tx.payment.findUnique({ where: { tenantId_reference: { tenantId, reference } } });
       if (same) return { existing: same };
+      const currentRequest = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId } });
+      if (!currentRequest || !isPurchasableRequest(currentRequest.status) || !canProfessionalAccessRequest(currentRequest, userId, user.professionalProfile!.categories, tenantId) || currentRequest.purchaseCount >= purchaseLimitForRequest(currentRequest, settings)) return { error: 'Solicitud no disponible' };
       const purchase = await tx.leadPurchase.findUnique({ where: { requestId_professionalId: { requestId, professionalId: user.professionalProfile!.id } } });
       if (purchase?.status === 'paid') return { error: 'Contacto ya comprado' };
       const active = purchase ? await tx.payment.findFirst({ where: { tenantId, metadata: { path: ['leadPurchaseId'], equals: purchase.id }, OR: [{ status: { in: ['under_review', 'approved'] } }, { status: { in: ['created', 'awaiting_transfer', 'pending_provider'] }, expiresAt: { gt: new Date() } }] } }) : null;
