@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet, ScrollRestoration } from "react-router";
+import { createBrowserRouter, Navigate, Outlet, ScrollRestoration } from "react-router";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./components/HomePage";
 import { ProPage } from "./components/ProPage";
@@ -11,6 +11,7 @@ import { ClientProfilePage } from "./components/ClientProfilePage";
 import { PaymentSuccess } from "./pages/PaymentSuccess";
 import { PaymentFailed } from "./pages/PaymentFailed";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { RouteGuard } from "@/shared/components/RouteGuard";
 import { UserRole } from "@/domain/types";
 
@@ -49,10 +50,12 @@ const publicRoutes = [
           { path: "search", Component: SearchResultsPage },
           { path: "profile/:id", Component: ProProfilePage },
           { path: "recuperar-contrasena", Component: ResetPasswordPage },
+          { path: "verificar-correo", Component: VerifyEmailPage },
+          { path: "publicar-servicio", element: <Navigate to="/mis-solicitudes" replace /> },
           {
             path: "mis-solicitudes",
             element: (
-              <RouteGuard allowedRoles={[UserRole.CLIENT, UserRole.PROFESSIONAL]}>
+              <RouteGuard allowedRoles={[UserRole.CLIENT]}>
                 <MyRequestsPage />
               </RouteGuard>
             ),
@@ -60,7 +63,7 @@ const publicRoutes = [
           {
             path: "mi-perfil",
             element: (
-              <RouteGuard allowedRoles={[UserRole.CLIENT, UserRole.PROFESSIONAL]}>
+              <RouteGuard allowedRoles={[UserRole.CLIENT]}>
                 <ClientProfilePage />
               </RouteGuard>
             ),

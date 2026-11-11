@@ -1,25 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, MessageSquare, Heart, Star, User } from 'lucide-react';
+import { ChevronDown, MessageSquare, Heart, Star, MapPin, Clock, BriefcaseBusiness } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { getPublicProfessionals, PublicProfessional } from '@/services/professionalService';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
-import { matchesProfessionalSearch, matchesServiceCategory } from '@/app/constants/serviceSearch';
+import { matchesProfessionalSearch, matchesServiceCategory, serviceLabel } from '@/app/constants/serviceSearch';
+import { listPublicServiceRequests } from '@/services/requestService';
+import { PublicServiceRequestPreview } from '@/domain/types';
+import { getCurrentAuth } from '@/services/authService';
 
 // Default images for fallback
 const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1622812947502-0a643f17387e?crop=entropy&cs=tinysrgb&fit=facearea&facepad=2&w=256&h=256&q=80";
 const DEFAULT_PORTFOLIO = "https://images.unsplash.com/photo-1581561515456-426c11b151fa?crop=entropy&cs=tinysrgb&fit=max&q=80&w=1080";
 
 export function SearchResultsPage() {
-  const [proServicesEnabled, setProServicesEnabled] = useState(false);
-  const [instantResponseEnabled, setInstantResponseEnabled] = useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const categoryFilter = searchParams.get('c');
   const searchQuery = searchParams.get('q');
+  const [activeView, setActiveView] = useState<'professionals' | 'clients'>(searchParams.get('view') === 'clients' ? 'clients' : 'professionals');
 
   const [professionals, setProfessionals] = useState<PublicProfessional[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [requests, setRequests] = useState<PublicServiceRequestPreview[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [requestsError, setRequestsError] = useState(false);
 
   useEffect(() => {
     const term = searchQuery || categoryFilter;
@@ -40,12 +45,43 @@ export function SearchResultsPage() {
       });
   }, []);
 
+  useEffect(() => {
+    listPublicServiceRequests()
+      .then(data => {
+        setRequests(data);
+        setRequestsError(false);
+      })
+      .catch(error => {
+        console.error('Error fetching public requests:', error);
+        setRequestsError(true);
+      })
+      .finally(() => setRequestsLoading(false));
+  }, []);
+
   const filteredProfessionals = React.useMemo(() => {
     return professionals.filter(pro =>
       (!categoryFilter || matchesServiceCategory(pro.profile?.categories || [], categoryFilter)) &&
       (!searchQuery || matchesProfessionalSearch(pro, searchQuery))
     );
   }, [professionals, categoryFilter, searchQuery]);
+
+  const filteredRequests = React.useMemo(() => requests.filter(request =>
+    (!categoryFilter || matchesServiceCategory([request.categorySlug], categoryFilter)) &&
+    (!searchQuery || `${request.categorySlug} ${request.city || ''}`.toLowerCase().includes(searchQuery.toLowerCase()))
+  ), [requests, categoryFilter, searchQuery]);
+
+  const openClientOpportunities = () => {
+    const auth = getCurrentAuth();
+    if (auth.isAuthenticated && auth.role === 'pro') {
+      navigate('/dashboard/contacts');
+      return;
+    }
+    if (auth.isAuthenticated) {
+      navigate(auth.role === 'guest' ? '/onboarding' : '/pro');
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('open-auth-modal', { detail: { view: 'login' } }));
+  };
 
   return (
     <div className="w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-4">
@@ -55,7 +91,9 @@ export function SearchResultsPage() {
       {/* Results Header */}
       <div className="flex justify-between items-center mb-6">
         <p className="text-[#62646A] text-sm font-medium">
-          {loading ? "Buscando..." : loadError ? 'No se pudieron cargar los resultados' : `${filteredProfessionals.length} resultados`}
+          {activeView === 'professionals'
+            ? (loading ? 'Buscando...' : loadError ? 'No se pudieron cargar los resultados' : `${filteredProfessionals.length} resultados`)
+            : (requestsLoading ? 'Buscando...' : requestsError ? 'No se pudieron cargar los resultados' : `${filteredRequests.length} resultados`)}
         </p>
         <div className="flex items-center text-sm font-medium text-[#62646A] cursor-pointer">
           <span className="mr-1">Ordenar por:</span>
@@ -65,8 +103,19 @@ export function SearchResultsPage() {
         </div>
       </div>
 
+      <div className="mb-6 inline-flex w-full rounded-xl border border-gray-200 bg-white p-1 sm:w-auto" role="tablist" aria-label="Tipo de resultados">
+        <button type="button" role="tab" aria-selected={activeView === 'professionals'} onClick={() => setActiveView('professionals')}
+          className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-none ${activeView === 'professionals' ? 'bg-[#101828] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+          Profesionales
+        </button>
+        <button type="button" role="tab" aria-selected={activeView === 'clients'} onClick={() => setActiveView('clients')}
+          className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors sm:flex-none ${activeView === 'clients' ? 'bg-[#101828] text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+          Clientes buscan servicios
+        </button>
+      </div>
+
       {/* Main Content Area: Banner + Grid */}
-      <div className="bg-[#FAF8F5] rounded-xl p-8 mb-8">
+      {activeView === 'professionals' && <div className="bg-[#FAF8F5] rounded-xl p-8 mb-8">
         <div className="flex items-start gap-4 mb-8">
           <MessageSquare className="w-8 h-8 text-[#404145] mt-1" />
           <div>
@@ -92,7 +141,7 @@ export function SearchResultsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {filteredProfessionals.map((pro) => {
               // Extract info with fallbacks
-              const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicios de ${pro.profile.categories[0]}` : "Profesional en servicios");
+              const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicios de ${serviceLabel(pro.profile.categories[0])}` : "Profesional en servicios");
               const bio = pro.profile?.bio || `Profesional verificado en ArtoCamello con ${pro.profile?.experienceYears || 0} años de experiencia.`;
               const rating = pro.profile?.rating || 5.0;
               const reviews = pro.profile?.reviewCount || 0;
@@ -176,7 +225,47 @@ export function SearchResultsPage() {
             })}
           </div>
         )}
-      </div>
+      </div>}
+
+      {activeView === 'clients' && (
+        <section className="mb-8 rounded-xl bg-[#FAF8F5] p-6 sm:p-8" aria-labelledby="client-requests-title">
+          <div className="mb-7 flex items-start gap-4">
+            <BriefcaseBusiness className="mt-1 h-8 w-8 shrink-0 text-[#404145]" />
+            <div>
+              <h2 id="client-requests-title" className="mb-1 text-xl font-bold text-[#404145]">Clientes que buscan un profesional</h2>
+              <p className="text-sm text-gray-600">Consulta oportunidades por categoría y ciudad. Los datos personales se protegen hasta el desbloqueo.</p>
+            </div>
+          </div>
+
+          {requestsLoading ? (
+            <div className="flex justify-center py-20"><div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-[#FFCA0C]" /></div>
+          ) : requestsError ? (
+            <div className="py-12 text-center" role="alert"><p className="font-medium text-gray-500">No se pudieron cargar las solicitudes de clientes. Intenta de nuevo mÃ¡s tarde.</p></div>
+          ) : filteredRequests.length === 0 ? (
+            <div className="py-12 text-center"><p className="font-medium text-gray-500">No hay solicitudes de clientes para esta búsqueda.</p></div>
+          ) : (
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredRequests.map(request => (
+                <article key={request.id} className="flex flex-col rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <span className="rounded-full bg-[#101828] px-2.5 py-1 text-xs font-bold text-white">{serviceLabel(request.categorySlug)}</span>
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-gray-500"><Clock className="h-3.5 w-3.5" />{new Date(request.createdAt).toLocaleDateString('es-EC')}</span>
+                  </div>
+                  <h3 className="mb-2 text-lg font-bold text-[#101828]">{request.title}</h3>
+                  <div className="mb-5 space-y-2 text-sm text-gray-600">
+                    <p className="flex items-center gap-2"><MapPin className="h-4 w-4 text-gray-400" />{request.city || 'Ciudad no indicada'}</p>
+                    <p>Presupuesto estimado: <span className="font-semibold text-[#101828]">${request.estimatedBudget.toFixed(2)} USD</span></p>
+                  </div>
+                  <p className="mb-4 text-xs leading-relaxed text-gray-500">Los datos de contacto y la ubicación exacta se protegen hasta que un profesional desbloquea la oportunidad.</p>
+                  <button type="button" onClick={openClientOpportunities} className="mt-auto rounded-lg bg-[#FFCA0C] px-4 py-2.5 text-sm font-bold text-[#101828] transition-colors hover:bg-[#e6b60b]">
+                    Soy profesional: ver oportunidades
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

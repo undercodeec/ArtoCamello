@@ -23,7 +23,13 @@ const SERVICE_ALIASES: Record<string, string[]> = {
   fumigacion: ['Fumigación'],
   'instalacion-pisos': ['Instalación de pisos'],
   'diseno-interiores': ['Diseño de interiores'],
+  cerrajeria: ['Cerrajeros', 'Cerrajería'],
+  climatizacion: ['Climatización'],
 };
+
+export const SERVICE_OPTIONS = Object.entries(SERVICE_ALIASES)
+  .map(([slug, aliases]) => ({ slug, label: aliases[0] }))
+  .sort((a, b) => a.label.localeCompare(b.label, 'es'));
 
 export function normalizeServiceText(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
@@ -36,6 +42,11 @@ for (const [service, aliases] of Object.entries(SERVICE_ALIASES)) {
 
 export function serviceId(value: string): string | undefined {
   return aliasToService.get(normalizeServiceText(value));
+}
+
+export function serviceLabel(value: string): string {
+  const id = serviceId(value);
+  return SERVICE_OPTIONS.find(option => option.slug === id)?.label || value;
 }
 
 export function matchesServiceCategory(categories: string[], filter: string): boolean {

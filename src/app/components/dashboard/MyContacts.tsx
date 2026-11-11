@@ -4,7 +4,7 @@ import {
   MapPin, Clock, Lock, AlertTriangle, CheckCircle,
   DollarSign, Eye, EyeOff, FileText, Star, Inbox
 } from 'lucide-react';
-import { ServiceRequest, UrgencyLevel, URGENCY_LABELS } from '@/domain/types';
+import { ProfessionalRequestPreview, UrgencyLevel, URGENCY_LABELS } from '@/domain/types';
 import { MAX_PROFESSIONALS_PER_REQUEST } from '@/domain/constants';
 import { listMatchingRequestsForProfessional } from '@/services/requestService';
 import { initiateLeadPayment, listUnlockedContacts, UnlockedContact } from '@/services/leadService';
@@ -40,7 +40,7 @@ function getUrgencyBadge(urgency: UrgencyLevel) {
 // ─── Sub-component: Solicitud Card (locked) ───────────────────────────────────
 
 interface InboxCardProps {
-  job: ServiceRequest;
+  job: ProfessionalRequestPreview;
   isLoading: boolean;
   error: string | null;
   onPay: (id: string) => void;
@@ -81,12 +81,12 @@ function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, tr
 
         {/* Job title & description */}
         <h3 className="text-lg font-bold text-[#101828] mb-1">{job.title}</h3>
-        <p className="text-gray-600 text-sm leading-relaxed line-clamp-3 mb-3">{job.description}</p>
+        <p className="text-gray-600 text-sm leading-relaxed mb-3">{job.visibility === 'direct' ? 'Solicitud dirigida a ti.' : 'Solicitud abierta a profesionales de esta categoría.'} Desbloquea el contacto para ver los detalles privados.</p>
 
         {/* Location */}
         <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-4">
           <MapPin className="w-4 h-4 text-gray-400 shrink-0" />
-          {job.location}
+          {job.city || 'Ciudad no indicada'}
         </div>
 
         {/* Contact info — blurred / hidden */}
@@ -371,7 +371,7 @@ export function MyContacts() {
   const [searchTerm, setSearchTerm] = useState('');
 
   // Inbox (pending leads to pay)
-  const [inboxJobs, setInboxJobs] = useState<ServiceRequest[]>([]);
+  const [inboxJobs, setInboxJobs] = useState<ProfessionalRequestPreview[]>([]);
   const [transferPayments, setTransferPayments] = useState<Record<string, TransferPayment>>({});
   const [inboxLoading, setInboxLoading] = useState(true);
   const [inboxError, setInboxError] = useState('');
@@ -480,8 +480,7 @@ export function MyContacts() {
     const q = searchTerm.toLowerCase();
     return (
       j.title.toLowerCase().includes(q) ||
-      j.description.toLowerCase().includes(q) ||
-      j.location.toLowerCase().includes(q)
+      (j.city || '').toLowerCase().includes(q)
     );
   });
 

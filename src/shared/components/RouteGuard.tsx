@@ -30,6 +30,7 @@ export function RouteGuard({ allowedRoles, children, redirectTo }: RouteGuardPro
   }, [auth.isAuthenticated]);
 
   if (!auth.isAuthenticated) {
+    if (location.pathname === '/mis-solicitudes' || location.pathname === '/mi-perfil') sessionStorage.setItem('authReturnTo', location.pathname + location.search);
     return React.createElement(Navigate, {
       to: redirectTo || '/',
       state: { from: location },
@@ -38,6 +39,10 @@ export function RouteGuard({ allowedRoles, children, redirectTo }: RouteGuardPro
   }
 
   if (!allowedRoles.includes(auth.role)) {
+    if (auth.role === UserRole.GUEST) {
+      if (location.pathname === '/mis-solicitudes' || location.pathname === '/mi-perfil') sessionStorage.setItem('authReturnTo', location.pathname + location.search);
+      return React.createElement(Navigate, { to: '/onboarding', replace: true });
+    }
     if (auth.role === UserRole.PROFESSIONAL) {
       return React.createElement(Navigate, { to: '/dashboard', replace: true });
     }

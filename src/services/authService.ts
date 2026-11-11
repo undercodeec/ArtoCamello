@@ -127,7 +127,7 @@ export async function resetPassword(token: string, password: string): Promise<st
 /**
  * Register a new user. Support verification flow.
  */
-export async function register(data: { email: string; password: string; fullName: string; role: UserRole; phone?: string }): Promise<{ requiresVerification: boolean, message: string; user?: User }> {
+export async function register(data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string }): Promise<{ requiresVerification: boolean, message: string; user?: User }> {
   const response = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -168,7 +168,28 @@ export async function register(data: { email: string; password: string; fullName
 /**
  * Updates the user's role on the backend during onboarding.
  */
-export async function updateRole(role: 'client' | 'pro'): Promise<User> {
+export async function verifyEmail(token: string): Promise<User> {
+  const response = await fetch(`${API_URL}/auth/verify-email`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo verificar el correo.');
+  const user = data.user as User;
+  setAuthState({ isAuthenticated: true, userId: user.id, role: user.role, email: user.email, token: data.token });
+  sessionStorage.setItem('cachedUser', JSON.stringify(user));
+  return user;
+}
+
+export async function resendVerification(email: string, captchaToken: string): Promise<string> {
+  const response = await fetch(`${API_URL}/auth/resend-verification`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, captchaToken }),
+  });
+  const data = await readApiMessage(response);
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'No se pudo solicitar otro enlace.');
+  return typeof data.message === 'string' ? data.message : 'Si la cuenta necesita confirmación, enviaremos un nuevo enlace.';
+}
+
+export async function updateRole(role: 'client' | 'pro', profile?: { fullName: string; phone: string }): Promise<User> {
   const auth = getAuthState();
   if (!auth.token) throw new Error('No hay sesión activa para actualizar rol');
 
@@ -178,7 +199,7 @@ export async function updateRole(role: 'client' | 'pro'): Promise<User> {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${auth.token}` 
     },
-    body: JSON.stringify({ role }),
+    body: JSON.stringify({ role, ...(role === 'client' ? profile : {}) }),
   });
 
   if (!response.ok) {

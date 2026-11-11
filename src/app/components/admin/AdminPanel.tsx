@@ -6,6 +6,7 @@ import { adminUrl, publicAppUrl } from '@/app/adminHost';
 import { forceAuth, getCurrentUser, logout } from '@/services/authService';
 import { User } from '@/domain/types';
 import { Bell, ClipboardList, CreditCard, LayoutDashboard, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings2, ShieldCheck, Users as UsersIcon, UserRound, X } from 'lucide-react';
+import { SERVICE_OPTIONS, serviceId } from '@/app/constants/serviceSearch';
 
 type List<T> = { items: T[]; total: number };
 const money = (amount: string | number, currency = 'USD') => `${Number(amount).toFixed(2)} ${currency}`;
@@ -272,16 +273,124 @@ function PrivateProofPreview({ proofUrl, mimeType, onOpen }: { proofUrl: string;
 function Users({ role, permissions }: { role: 'client' | 'pro' | 'guest'; permissions: Set<string> }) {
   const [search, setSearch] = useState(''); const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
-  const { data, error, loading, reload } = useData<List<{ id: string; email: string; fullName: string; role: 'client' | 'guest' | 'pro'; active: boolean; createdAt: string; professionalProfile?: { verified: boolean }; _count: { serviceRequests: number } }>>(`/users?role=${role}&search=${encodeURIComponent(search)}&page=${page}`);
+  const { data, error, loading, reload } = useData<List<{ id: string; email: string; fullName: string; role: 'client' | 'guest' | 'pro'; active: boolean; createdAt: string; professionalProfile?: { verified: boolean; categories: string[] }; _count: { serviceRequests: number } }>>(`/users?role=${role}&search=${encodeURIComponent(search)}&page=${page}`);
   const change = async (id: string, active: boolean) => { const reason = window.prompt(active ? 'Motivo de reactivación' : 'Motivo de suspensión'); if (!reason) return; try { await adminRequest(`/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ active, reason }) }); reload(); } catch (e) { alert((e as Error).message); } };
   const verify = async (id: string, verified: boolean) => { if (!window.confirm(verified ? '¿Verificar profesional?' : '¿Revocar verificación?')) return; try { await adminRequest(`/professionals/${id}/verify`, { method: 'POST', body: JSON.stringify({ verified }) }); reload(); } catch (e) { alert((e as Error).message); } };
   const title = role === 'pro' ? 'Profesionales' : role === 'client' ? 'Clientes' : 'Registros pendientes';
-  return <section><h1 className="text-3xl font-bold mb-5">{title}</h1>{role === 'guest' && <p className="text-sm text-gray-600 mb-4">Estas cuentas aún no han elegido si serán clientes o profesionales.</p>}<input className={`${input} mb-4`} placeholder="Nombre o correo" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : <><div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Nombre</th><th>Correo</th><th>Estado</th><th>{role === 'pro' ? 'Verificación' : role === 'client' ? 'Solicitudes' : 'Rol'}</th><th>Alta</th><th></th></tr></thead><tbody>{data?.items.length ? data.items.map(u => <tr key={u.id} className="border-t"><td className="p-3">{u.fullName}</td><td>{u.email}</td><td>{u.active ? 'Activo' : 'Suspendido'}</td><td>{role === 'pro' ? (u.professionalProfile?.verified ? 'Verificado' : 'Pendiente') : role === 'client' ? u._count.serviceRequests : 'Sin definir'}</td><td>{date(u.createdAt)}</td><td className="space-x-2"><button className="underline" onClick={() => setSelected(u.id)}>Detalle</button>{permissions.has('users.manage') && <button className="underline" onClick={() => change(u.id, !u.active)}>{u.active ? 'Suspender' : 'Reactivar'}</button>}{role === 'pro' && permissions.has('professionals.verify') && <button className="underline" onClick={() => verify(u.id, !u.professionalProfile?.verified)}>{u.professionalProfile?.verified ? 'Revocar' : 'Verificar'}</button>}</td></tr>) : <tr><td className="p-5 text-gray-500" colSpan={6}>No hay usuarios para mostrar.</td></tr>}</tbody></table></div><Pager page={page} total={data?.total || 0} onPage={setPage} /></>}{selected && <UserDetail id={selected} onClose={() => setSelected(null)} />}</section>;
+  return <section>
+    <h1 className="mb-2 text-3xl font-bold">{title}</h1>
+    {role === 'guest' && <p className="mb-4 text-sm text-gray-600">Estas cuentas aún no han elegido si serán clientes o profesionales.</p>}
+    {role === 'pro' && <p className="mb-4 text-sm text-gray-600">Para verificar un perfil, el profesional debe haber seleccionado al menos un servicio.</p>}
+    <input aria-label="Buscar por nombre o correo" className={`${input} mb-4 w-full max-w-sm`} placeholder="Nombre o correo" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} />
+    {error && <p role="alert" className="mb-4 text-sm text-red-700">{error}</p>}
+    {loading ? <p role="status" className="text-sm text-gray-600">Cargando usuarios...</p> : <>
+      <div className="overflow-x-auto rounded-xl border bg-white">
+        <table className="w-full min-w-[760px] text-left text-sm">
+          <thead><tr className="border-b bg-gray-50 text-gray-600"><th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Estado</th><th className="p-3">{role === 'pro' ? 'Verificación' : role === 'client' ? 'Solicitudes' : 'Rol'}</th><th className="p-3">Alta</th><th className="p-3">Acciones</th></tr></thead>
+          <tbody>{data?.items.length ? data.items.map(user => {
+            const missingServices = role === 'pro' && !user.professionalProfile?.categories?.some(category => category.trim());
+            const verified = user.professionalProfile?.verified === true;
+            return <tr key={user.id} className="border-b last:border-0">
+              <td className="p-3 font-medium text-[#101828]">{user.fullName}</td>
+              <td className="p-3 text-gray-600">{user.email}</td>
+              <td className="p-3">{user.active ? 'Activo' : 'Suspendido'}</td>
+              <td className="p-3">{role === 'pro' ? verified ? 'Verificado' : missingServices ? <span className="font-semibold text-amber-800">Sin servicios</span> : 'Pendiente' : role === 'client' ? user._count.serviceRequests : 'Sin definir'}</td>
+              <td className="p-3 whitespace-nowrap">{date(user.createdAt)}</td>
+              <td className="p-3"><div className="flex flex-wrap gap-3"><button type="button" className="font-medium text-blue-700 underline" onClick={() => setSelected(user.id)}>Detalle</button>{permissions.has('users.manage') && <button type="button" className="text-blue-700 underline" onClick={() => change(user.id, !user.active)}>{user.active ? 'Suspender' : 'Reactivar'}</button>}{role === 'pro' && permissions.has('professionals.verify') && <button type="button" disabled={!verified && missingServices} title={!verified && missingServices ? 'El profesional debe seleccionar un servicio' : undefined} className="text-blue-700 underline disabled:cursor-not-allowed disabled:text-gray-400" onClick={() => verify(user.id, !verified)}>{verified ? 'Revocar' : 'Verificar'}</button>}</div></td>
+            </tr>;
+          }) : <tr><td className="p-5 text-gray-500" colSpan={6}>No hay usuarios para mostrar.</td></tr>}</tbody>
+        </table>
+      </div>
+      <Pager page={page} total={data?.total || 0} onPage={setPage} />
+    </>}
+    {selected && <UserDetail id={selected} onClose={() => setSelected(null)} />}
+  </section>;
 }
 
 function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, error, loading } = useData<{ fullName: string; email: string; phone?: string; role: string; isAdmin: boolean; active: boolean; professionalProfile?: { businessName?: string; bio?: string; categories: string[]; verified: boolean; documentType?: string; documentId?: string }; serviceRequests: Array<{ id: string; title: string; status: string }>; purchases: Array<{ id: string; request: { title: string }; status: string; costUSD: number }>; payments: Array<{ id: string; status: string; amount: string }> }>(`/users/${id}`);
+  if (data?.role === 'pro' && data.professionalProfile) return <ProfessionalUserDetail data={data as AdminProfessionalDetail} onClose={onClose} />;
   return <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-auto" role="dialog" aria-modal="true"><div className="bg-white max-w-2xl mx-auto my-8 p-6 rounded-xl shadow-xl"><button onClick={onClose} className="float-right underline">Cerrar</button><h2 className="text-2xl font-bold mb-4">Perfil</h2>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <div className="space-y-4 text-sm"><p><b>{data.fullName}</b> · {data.email} · {data.phone || 'Sin teléfono'} · {data.active ? 'Activo' : 'Suspendido'}</p>{data.professionalProfile && <div><h3 className="font-bold">Profesional</h3><p>{data.professionalProfile.businessName} · {data.professionalProfile.verified ? 'Verificado' : 'Pendiente'}</p><p>{data.professionalProfile.bio}</p><p>Categorías: {data.professionalProfile.categories.join(', ')}</p><p>Documento: {data.professionalProfile.documentType || 'No registrado'} {data.professionalProfile.documentId || ''}</p></div>}{data.role === 'client' && <div><h3 className="font-bold">Solicitudes</h3>{data.serviceRequests.length ? data.serviceRequests.map(r => <p key={r.id}>{r.title} · {r.status}</p>) : <p>Sin solicitudes.</p>}</div>}{data.role === 'pro' && !data.isAdmin && <><div><h3 className="font-bold">Contactos adquiridos</h3>{data.purchases.length ? data.purchases.map(p => <p key={p.id}>{p.request.title} · {p.status} · ${p.costUSD.toFixed(2)}</p>) : <p>Sin contactos adquiridos.</p>}</div><div><h3 className="font-bold">Pagos por contactos</h3>{data.payments.length ? data.payments.map(p => <p key={p.id}>{p.id} · {p.status} · {money(p.amount)}</p>) : <p>Sin pagos.</p>}</div></>}</div>}</div></div>;
+}
+
+type AdminProfessionalDetail = {
+  fullName: string; email: string; phone?: string; active: boolean; emailVerified?: boolean;
+  createdAt?: string; isAdmin: boolean;
+  professionalProfile: {
+    businessName?: string | null; bio?: string | null; categories: string[]; skills?: string[];
+    serviceZones?: string[]; city?: string | null; experienceYears?: number;
+    verified: boolean; documentType?: string | null; documentId?: string | null;
+  };
+  purchases: Array<{ id: string; request: { title: string }; status: string; costUSD: number }>;
+  payments: Array<{ id: string; status: string; amount: string; method?: string; createdAt?: string }>;
+};
+
+function DetailValue({ label, value }: { label: string; value?: React.ReactNode }) {
+  return <div className="min-w-0"><dt className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</dt><dd className="mt-1 break-words text-sm font-medium text-[#101828]">{value || <span className="font-normal text-gray-500">No registrado</span>}</dd></div>;
+}
+
+function ProfessionalUserDetail({ data, onClose }: { data: AdminProfessionalDetail; onClose: () => void }) {
+  const profile = data.professionalProfile;
+  const categoryLabel = (category: string) => SERVICE_OPTIONS.find(option => option.slug === serviceId(category))?.label || category;
+  const hasCategories = profile.categories.some(category => category.trim());
+  const badge = (enabled: boolean, yes: string, no: string) => <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${enabled ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{enabled ? yes : no}</span>;
+
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="professional-detail-title">
+    <div className="mx-auto my-3 max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl sm:my-8">
+      <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-200 bg-white p-5 sm:p-6">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Detalle del profesional</p>
+          <h2 id="professional-detail-title" className="mt-1 break-words text-2xl font-bold text-[#101828]">{data.fullName}</h2>
+          <div className="mt-3 flex flex-wrap gap-2">{badge(data.active, 'Cuenta activa', 'Cuenta suspendida')}{badge(profile.verified, 'Perfil verificado', 'Pendiente de verificación')}{badge(hasCategories, 'Servicios definidos', 'Sin servicios')}</div>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Cerrar detalle" className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+      </header>
+
+      <div className="space-y-5 p-5 sm:p-6">
+        {!hasCategories && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Este profesional aún no selecciona servicios. Debe hacerlo desde su perfil antes de recibir solicitudes o ser verificado.</div>}
+
+        <section aria-labelledby="professional-contact-heading" className="rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h3 id="professional-contact-heading" className="mb-4 text-base font-bold text-[#101828]">Cuenta y contacto</h3>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <DetailValue label="Correo" value={<a href={`mailto:${data.email}`} className="text-blue-700 underline">{data.email}</a>} />
+            <DetailValue label="Teléfono" value={data.phone ? <a href={`tel:${data.phone}`} className="text-blue-700 underline">{data.phone}</a> : undefined} />
+            <DetailValue label="Correo verificado" value={data.emailVerified === undefined ? undefined : data.emailVerified ? 'Sí' : 'No'} />
+            <DetailValue label="Fecha de registro" value={data.createdAt ? date(data.createdAt) : undefined} />
+          </dl>
+        </section>
+
+        <section aria-labelledby="professional-services-heading" className="rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h3 id="professional-services-heading" className="mb-4 text-base font-bold text-[#101828]">Actividad profesional</h3>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <DetailValue label="Nombre comercial" value={profile.businessName} />
+            <DetailValue label="Ciudad" value={profile.city} />
+            <DetailValue label="Experiencia" value={profile.experienceYears === undefined ? undefined : `${profile.experienceYears} años`} />
+            <DetailValue label="Zonas de trabajo" value={profile.serviceZones?.length ? profile.serviceZones.join(', ') : undefined} />
+          </dl>
+          <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Servicios seleccionados</p>{hasCategories ? <div className="mt-2 flex flex-wrap gap-2">{profile.categories.filter(Boolean).map(category => <span key={category} className="rounded-full bg-[#FFCA0C]/20 px-3 py-1 text-xs font-semibold text-[#101828]">{categoryLabel(category)}</span>)}</div> : <p className="mt-1 text-sm text-gray-500">Ninguno todavía</p>}</div>
+          <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Descripción</p><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{profile.bio?.trim() || 'Sin descripción'}</p></div>
+          <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Habilidades</p><p className="mt-1 text-sm text-gray-700">{profile.skills?.length ? profile.skills.join(' · ') : 'No registradas'}</p></div>
+        </section>
+
+        <section aria-labelledby="professional-identity-heading" className="rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h3 id="professional-identity-heading" className="mb-4 text-base font-bold text-[#101828]">Identidad</h3>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <DetailValue label="Tipo de documento" value={profile.documentType} />
+            {'documentId' in profile && <DetailValue label="Número de documento" value={profile.documentId} />}
+          </dl>
+        </section>
+
+        {!data.isAdmin && <section aria-labelledby="professional-activity-heading" className="rounded-xl border border-gray-200 p-4 sm:p-5">
+          <h3 id="professional-activity-heading" className="mb-4 text-base font-bold text-[#101828]">Contactos y pagos</h3>
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div><h4 className="text-sm font-semibold">Contactos adquiridos ({data.purchases.length})</h4>{data.purchases.length ? <ul className="mt-2 space-y-2">{data.purchases.map(purchase => <li key={purchase.id} className="rounded-lg bg-gray-50 p-3 text-sm"><p className="font-medium">{purchase.request.title}</p><p className="mt-1 text-gray-600">{purchase.status === 'paid' ? 'Pagado' : 'Pendiente'} · {money(purchase.costUSD)}</p></li>)}</ul> : <p className="mt-2 text-sm text-gray-500">Sin contactos adquiridos.</p>}</div>
+            <div><h4 className="text-sm font-semibold">Pagos ({data.payments.length})</h4>{data.payments.length ? <ul className="mt-2 space-y-2">{data.payments.map(payment => <li key={payment.id} className="rounded-lg bg-gray-50 p-3 text-sm"><p className="font-medium">{money(payment.amount)} · {payment.method || 'Pago'}</p><p className="mt-1 text-gray-600">{status[payment.status] || payment.status}{payment.createdAt ? ` · ${date(payment.createdAt)}` : ''}</p></li>)}</ul> : <p className="mt-2 text-sm text-gray-500">Sin pagos registrados.</p>}</div>
+          </div>
+        </section>}
+      </div>
+      <footer className="border-t border-gray-200 bg-gray-50 p-4 text-right"><button type="button" onClick={onClose} className={button}>Cerrar</button></footer>
+    </div>
+  </div>;
 }
 
 function Admins({ permissions }: { permissions: Set<string> }) {

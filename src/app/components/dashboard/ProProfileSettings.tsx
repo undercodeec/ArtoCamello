@@ -4,7 +4,7 @@ import {
   Save, CheckCircle, AlertCircle, Loader2, X, Plus, Phone, Mail, User
 } from 'lucide-react';
 import { getCurrentAuth } from '@/services/authService';
-import { getAllCategories } from '@/services/categoryService';
+import { SERVICE_OPTIONS, serviceId } from '@/app/constants/serviceSearch';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -15,28 +15,6 @@ const AVAILABLE_ZONES = [
   'Loja', 'Ibarra', 'Latacunga', 'Riobamba', 'Portoviejo', 'Manta',
   'Quevedo', 'Santo Domingo', 'Esmeraldas', 'Machala',
 ];
-
-// ─── Servicios del Header ─────────────────────────────────────────────────────
-const HEADER_SERVICES = [
-  'Albañiles',
-  'Jardineros',
-  'Manitas a domicilio',
-  'Pintores',
-  'Fontaneros',
-  'Adiestrador canino',
-  'Electricistas',
-  'Entrenador personal',
-  'Limpieza a domicilio',
-  'Alquiler de furgonetas con conductor',
-  'Carpinteros',
-  'Psicólogos',
-  'Desbrozar parcela',
-  'Cambiar bañera por plato de ducha',
-  'Reforma integral de piso',
-  'Instalar o cambiar termo eléctrico',
-  'Montadores de muebles',
-  'Empresas de reformas'
-].sort();
 
 // ─── Toast component ──────────────────────────────────────────────────────────
 type ToastType = 'success' | 'error' | 'loading';
@@ -121,7 +99,7 @@ export function ProProfileSettings() {
             avatarUrl:       data.user.avatarUrl       || '',
             businessName:    data.profile?.businessName || '',
             bio:             data.profile?.bio          || '',
-            categories:      data.profile?.categories   || [],
+            categories:      [...new Set<string>((data.profile?.categories || []).map((category: string) => serviceId(category) || category))],
             serviceZones:    data.profile?.serviceZones || [],
             experienceYears: data.profile?.experienceYears || 0,
             portfolioImages: data.profile?.portfolioImages || [],
@@ -146,6 +124,11 @@ export function ProProfileSettings() {
   const handleSave = async () => {
     const token = sessionStorage.getItem('authToken');
     if (!token) return;
+    if (profile.categories.length === 0) {
+      showToast('error', 'Selecciona al menos un servicio antes de guardar el perfil.');
+      document.getElementById('professional-services')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     setSaving(true);
     showToast('loading', 'Guardando cambios...');
     try {
@@ -590,27 +573,29 @@ export function ProProfileSettings() {
             </div>
 
             {/* Categories */}
-            <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+            <div id="professional-services" className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
               <h3 className="font-bold text-[#101828] flex items-center gap-2 mb-4">
-                <Wrench className="w-5 h-5 text-[#FFCA0C]" /> Servicios que ofreces
+                <Wrench className="w-5 h-5 text-[#FFCA0C]" /> Servicios que ofreces <span className="text-xs font-medium text-red-700">Obligatorio</span>
               </h3>
               <p className="text-xs text-gray-400 mb-3">
                 Los clientes podrán encontrarte según estas categorías.
               </p>
               <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
-                {HEADER_SERVICES.map((serviceName) => (
-                  <label key={serviceName} className="flex items-center gap-3 p-2.5 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors">
+                {SERVICE_OPTIONS.map(({ slug, label }) => (
+                  <label key={slug} className="flex items-center gap-3 p-2.5 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors">
                     <input
                       type="checkbox"
-                      id={`cat-${serviceName}`}
-                      checked={profile.categories.includes(serviceName)}
-                      onChange={() => toggleCategory(serviceName)}
+                      id={`cat-${slug}`}
+                      checked={profile.categories.includes(slug)}
+                      onChange={() => toggleCategory(slug)}
                       className="w-4 h-4 rounded border-gray-300 text-[#101828] focus:ring-[#101828]"
                     />
-                    <span className="text-sm font-medium text-gray-700">{serviceName}</span>
+                    <span className="text-sm font-medium text-gray-700">{label}</span>
                   </label>
                 ))}
               </div>
+              {profile.categories.filter(category => !SERVICE_OPTIONS.some(option => option.slug === category)).map(category => <span key={category} className="mt-2 mr-2 inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700">{category}<button type="button" onClick={() => toggleCategory(category)} aria-label={`Quitar ${category}`}><X className="h-3 w-3" /></button></span>)}
+              {profile.categories.length === 0 && <p className="mt-3 text-xs font-medium text-amber-800">Elige al menos un servicio para recibir solicitudes de tu especialidad.</p>}
               {profile.categories.length > 0 && (
                 <p className="text-xs text-green-600 font-medium mt-3">
                   ✓ {profile.categories.length} {profile.categories.length === 1 ? 'servicio seleccionado' : 'servicios seleccionados'}

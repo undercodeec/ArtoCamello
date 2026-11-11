@@ -69,29 +69,29 @@ export function Hero() {
   }, []);
 
   return (
-    <section id="solicitar" className="bg-[#FFCA0C] relative overflow-hidden pt-32 pb-16 lg:py-32 min-h-[700px] flex items-center">
+    <section id="solicitar" className="bg-[#FFCA0C] relative overflow-hidden pt-28 pb-12 lg:py-24 min-h-[620px] flex items-center">
       {/* Background Dark Circle - Bottom Left */}
       <div className="absolute -left-20 -bottom-16 w-56 h-56 bg-black/5 rounded-full z-0 pointer-events-none"></div>
 
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-12 lg:gap-4">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-4">
         
         {/* Left Column - Text & Search */}
-        <div className="w-full lg:w-[55%] z-20 flex flex-col justify-center">
-          <h1 className="text-5xl md:text-6xl lg:text-[64px] font-extrabold text-gray-900 mb-6 leading-[1.15] tracking-tight">
+        <div className="w-full lg:w-[58%] z-20 flex flex-col justify-center">
+          <h1 className="max-w-[750px] text-4xl sm:text-[42px] lg:text-[48px] font-extrabold text-gray-900 mb-5 leading-[1.12] tracking-tight text-balance">
             Encuentra a los mejores profesionales para tu hogar o negocio
           </h1>
-          <p className="text-lg md:text-xl text-gray-800 mb-10 max-w-[650px] leading-relaxed font-medium">
-            Recibe presupuestos gratuitos y sin compromiso de profesionales locales verificados que irán directamente a tu puerta. Desde reformas integrales, pintores y limpieza, hasta reparaciones urgentes y mudanzas.
+          <p className="text-base lg:text-lg text-gray-800 mb-8 max-w-[650px] leading-relaxed font-medium">
+            Recibe presupuestos gratuitos de profesionales locales verificados para reformas, limpieza, reparaciones y mucho más.
           </p>
 
           {/* Search Bar */}
-          <form onSubmit={handleSearch} className="bg-white rounded-full p-2 flex items-center max-w-[550px] shadow-lg mb-8">
+          <form onSubmit={handleSearch} className="bg-white rounded-full p-2 flex items-center max-w-[550px] shadow-lg mb-7">
             <input 
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder='¿Qué servicio necesitas hoy?'
-              className="flex-grow bg-transparent border-none focus:ring-0 px-6 text-gray-800 placeholder-gray-500 text-base md:text-lg outline-none"
+              className="min-w-0 flex-grow bg-transparent border-none focus:ring-0 px-4 sm:px-6 text-gray-800 placeholder-gray-500 text-sm sm:text-base outline-none"
             />
             <button type="submit" className="bg-gray-900 hover:bg-black text-[#FFCA0C] w-14 h-14 rounded-full flex items-center justify-center transition-colors shrink-0 shadow-md">
               <Search className="w-6 h-6" strokeWidth={2.5} />
@@ -99,7 +99,7 @@ export function Hero() {
           </form>
 
           {/* Additional Content - Popular Searches */}
-          <div className="flex flex-wrap items-center gap-3 text-sm md:text-base">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-gray-900">Servicios más solicitados:</span>
             <div className="flex flex-wrap gap-2">
               {['Pintores', 'Reformas', 'Limpieza', 'Mudanzas'].map(term => (
@@ -116,7 +116,7 @@ export function Hero() {
         </div>
 
         {/* Right Column - Image Collage */}
-        <div className="w-full lg:w-[45%] relative h-[500px] lg:h-[600px] flex items-center justify-center">
+        <div className="w-full lg:w-[42%] relative h-[440px] lg:h-[550px] flex items-center justify-center">
           
           {/* Main Hero Image */}
           <div className="relative z-10 w-full h-full flex items-center justify-center drop-shadow-2xl">

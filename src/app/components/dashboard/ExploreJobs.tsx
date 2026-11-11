@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Clock, Lock, Filter, Search, AlertTriangle, CheckCircle, DollarSign } from 'lucide-react';
 import { MAX_PROFESSIONALS_PER_REQUEST } from '@/domain/constants';
-import { ServiceRequest, UrgencyLevel, URGENCY_LABELS } from '@/domain/types';
+import { ProfessionalRequestPreview, UrgencyLevel, URGENCY_LABELS } from '@/domain/types';
 import { listMatchingRequestsForProfessional } from '@/services/requestService';
 import { initiateLeadPayment, hasPurchasedLead } from '@/services/leadService';
 import { getCurrentAuth } from '@/services/authService';
@@ -12,7 +12,7 @@ import { trackMetaEvent } from '@/shared/lib/metaPixel';
 export function ExploreJobs() {
   const [filterCategory, setFilterCategory] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [jobs, setJobs] = useState<ServiceRequest[]>([]);
+  const [jobs, setJobs] = useState<ProfessionalRequestPreview[]>([]);
   const [jobsError, setJobsError] = useState('');
   const [purchasedSet, setPurchasedSet] = useState<Set<string>>(new Set());
   const [loadingPayment, setLoadingPayment] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export function ExploreJobs() {
     const matchKeyword =
       searchKeyword === '' ||
       job.title.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-      job.description.toLowerCase().includes(searchKeyword.toLowerCase());
+      (job.city || '').toLowerCase().includes(searchKeyword.toLowerCase());
     return matchCat && matchKeyword;
   });
 
@@ -187,11 +187,11 @@ export function ExploreJobs() {
                   </div>
 
                   <h3 className="text-xl font-bold text-[#101828] mb-2">{job.title}</h3>
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-2">{job.description}</p>
+                  <p className="text-gray-600 text-sm mb-4">{job.visibility === 'direct' ? 'Solicitud dirigida exclusivamente a ti.' : 'Solicitud abierta a varios profesionales elegibles.'} Los datos completos se habilitan tras el pago.</p>
 
                   <div className="space-y-2 text-sm text-gray-600">
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-gray-400" /> {job.location}
+                      <MapPin className="w-4 h-4 text-gray-400" /> {job.city || 'Ciudad no indicada'}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${getUrgencyColor(job.urgency)}`}></span>

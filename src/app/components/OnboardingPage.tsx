@@ -1,25 +1,31 @@
-import React, { useState } from 'react';
-import { Search, User, Star, Check, ArrowLeft, Clock, X, Info, ShieldCheck, Check as CheckIcon, Pencil, MapPin, MessageCircle, Plus, MoreHorizontal, Camera, Users, Upload, Trash2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Search, User, Star, Check, ArrowLeft, X, Info, ShieldCheck, Check as CheckIcon, Pencil, MapPin, MessageCircle, Plus, MoreHorizontal, Camera, Users, Upload, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { motion } from 'motion/react';
 import { useAuth } from '@/shared/context/AuthContext';
-import { updateProfessionalProfile } from '@/services/professionalService';
+import { getMyProfessionalProfile, updateProfessionalProfile } from '@/services/professionalService';
 import { UserRole } from '@/domain/types';
+import { normalizeServiceText, SERVICE_OPTIONS, serviceId } from '@/app/constants/serviceSearch';
+import { ClientOnboardingData, validateClientOnboarding } from '@/app/constants/clientOnboarding';
 
 export function OnboardingPage() {
   const { updateRole, auth } = useAuth();
   const [selectedRole, setSelectedRole] = useState<'client' | 'freelancer' | null>(auth.role === UserRole.PROFESSIONAL ? 'freelancer' : null);
   const [step, setStep] = useState(auth.role === UserRole.PROFESSIONAL ? 4 : 1);
-  const [selectedPurposes, setSelectedPurposes] = useState<string[]>([]);
+  const [clientData, setClientData] = useState<ClientOnboardingData>({ fullName: '', phone: '' });
   const [selectedPlan, setSelectedPlan] = useState<'basic' | 'pro'>('pro'); // Default to pro since it's "Recomendado"
   const [isTeam, setIsTeam] = useState<'independent' | 'team' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [onboardingError, setOnboardingError] = useState('');
+  const [serviceQuery, setServiceQuery] = useState('');
+  const [profileLoading, setProfileLoading] = useState(auth.role === UserRole.PROFESSIONAL);
+  const [wasProfessionalOnEntry] = useState(auth.role === UserRole.PROFESSIONAL);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [profileData, setProfileData] = useState({
     fullName: '',
     businessName: '',
     bio: '',
+    categories: [] as string[],
     experienceYears: 0,
     avatarUrl: '',
     skills: [] as string[],
@@ -38,6 +44,27 @@ export function OnboardingPage() {
     'Árabe', 'Ruso', 'Holandés', 'Sueco', 'Catalán',
   ];
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!wasProfessionalOnEntry) return;
+    let active = true;
+    getMyProfessionalProfile().then(({ user, profile }) => {
+      if (!active) return;
+      setProfileData(previous => ({
+        ...previous,
+        fullName: user.fullName || '', phone: user.phone || '', avatarUrl: user.avatarUrl || '',
+        businessName: profile?.businessName || '', bio: profile?.bio || '',
+        categories: [...new Set((profile?.categories || []).map(category => serviceId(category) || category))],
+        experienceYears: profile?.experienceYears || 0, skills: profile?.skills || [],
+        city: profile?.city || '', address: profile?.address || '',
+        documentType: profile?.documentType || 'cedula', documentId: profile?.documentId || '',
+        portfolioImages: profile?.portfolioImages || [],
+      }));
+    }).catch(error => {
+      if (active) setOnboardingError(error instanceof Error ? error.message : 'No se pudo cargar tu perfil.');
+    }).finally(() => { if (active) setProfileLoading(false); });
+    return () => { active = false; };
+  }, [wasProfessionalOnEntry]);
   
   const [newSkill, setNewSkill] = useState("");
   
@@ -69,10 +96,14 @@ export function OnboardingPage() {
         }
       }
     } else if (step === 2) {
+      const problem = validateClientOnboarding(clientData);
+      if (problem) { setOnboardingError(problem); return; }
       try {
         setIsSubmitting(true);
-        await updateRole('client');
-        navigate('/');
+        await updateRole('client', { fullName: clientData.fullName.trim(), phone: clientData.phone.trim() });
+        const returnTo = sessionStorage.getItem('authReturnTo');
+        sessionStorage.removeItem('authReturnTo');
+        navigate(returnTo?.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/mis-solicitudes');
       } catch(e) {
         console.error("Error finalizing onboarding", e);
         setOnboardingError(e instanceof Error ? e.message : 'No se pudo completar el registro.');
@@ -80,19 +111,22 @@ export function OnboardingPage() {
         setIsSubmitting(false);
       }
       return;
+    } else if (step === 4) {
+      if (profileData.categories.length === 0) {
+        setOnboardingError('Selecciona al menos un servicio para que los clientes puedan encontrarte.');
+        document.getElementById('onboarding-services')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      setStep(5);
     } else if (step === 5) {
       setStep(6);
-    } else if (step === 3 || step === 6) {
+    } else if (step === 6) {
       try {
         setIsSubmitting(true);
         if (selectedRole === 'freelancer') {
-          if (profileData.fullName || profileData.businessName || profileData.bio || profileData.portfolioImages.length > 0 || profileData.avatarUrl) {
-            await updateProfessionalProfile(profileData);
-          }
+          if (profileData.categories.length === 0) { setStep(4); setOnboardingError('Selecciona al menos un servicio.'); return; }
+          await updateProfessionalProfile(profileData);
           navigate('/dashboard');
-        } else {
-          await updateRole('client');
-          navigate('/');
         }
       } catch(e) {
         console.error("Error finalizing onboarding", e);
@@ -140,13 +174,7 @@ export function OnboardingPage() {
     }));
   };
 
-  const togglePurpose = (purpose: string) => {
-    setSelectedPurposes(prev => 
-      prev.includes(purpose) 
-        ? prev.filter(p => p !== purpose)
-        : [...prev, purpose]
-    );
-  };
+  if (step === 4 && profileLoading) return <main className="min-h-screen grid place-items-center bg-[#F7F7F7] text-[#101828]" role="status">Cargando tu perfil profesional...</main>;
 
   if (step === 4) {
     return (
@@ -166,6 +194,8 @@ export function OnboardingPage() {
             <h1 className="text-[#101828] text-[32px] font-bold mb-3">Revisa tu nuevo perfil</h1>
             <p className="text-gray-500 text-[16px]">Completa tu perfil con la información que falte. Puedes actualizarlo cuando quieras.</p>
           </div>
+
+          {onboardingError && <p role="alert" className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{onboardingError}</p>}
 
           <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm flex flex-col gap-6 mb-8">
             {/* Top Profile Section */}
@@ -275,6 +305,20 @@ export function OnboardingPage() {
                 onChange={(e) => setProfileData(prev => ({ ...prev, bio: e.target.value }))}
               />
             </div>
+
+            {/* Skills & Experience */}
+            <section id="onboarding-services" className="rounded-xl border border-gray-200 p-6">
+              <h3 className="text-[#101828] text-[20px] font-bold">Servicios que ofreces <span className="text-sm font-medium text-red-700">Obligatorio</span></h3>
+              <p className="mt-1 text-sm text-gray-600">Selecciona al menos uno. Tus servicios determinan en qué búsquedas y solicitudes apareces.</p>
+              <input type="search" value={serviceQuery} onChange={event => setServiceQuery(event.target.value)} placeholder="Buscar un servicio" aria-label="Buscar un servicio" className="mt-4 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#101828] focus:outline-none" />
+              <div className="mt-3 grid max-h-60 gap-2 overflow-y-auto sm:grid-cols-2">
+                {SERVICE_OPTIONS.filter(option => normalizeServiceText(option.label).includes(normalizeServiceText(serviceQuery))).map(({ slug, label }) => <label key={slug} className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 p-2 text-sm hover:border-[#101828]">
+                  <input type="checkbox" checked={profileData.categories.includes(slug)} onChange={() => setProfileData(previous => ({ ...previous, categories: previous.categories.includes(slug) ? previous.categories.filter(category => category !== slug) : [...previous.categories, slug] }))} />
+                  {label}
+                </label>)}
+              </div>
+              <p className="mt-3 text-sm font-medium text-[#101828]">{profileData.categories.length} {profileData.categories.length === 1 ? 'servicio seleccionado' : 'servicios seleccionados'}</p>
+            </section>
 
             {/* Skills & Experience */}
             <div className="border border-gray-200 rounded-xl p-6">
@@ -447,7 +491,7 @@ export function OnboardingPage() {
             </button>
 
             <button 
-              onClick={() => setStep(5)}
+              onClick={handleNext}
               className="bg-[#101828] text-white px-8 py-2.5 rounded-md font-bold text-[15px] hover:bg-gray-800 transition-colors"
             >
               Continuar
@@ -498,7 +542,7 @@ export function OnboardingPage() {
               className="text-center w-full mb-10"
             >
               <h1 className="text-[#101828] text-[32px] font-bold leading-tight mb-3">
-                usuario_prueba, ¡se ha creado tu cuenta! ¿Por qué has recurrido a nuestra plataforma?
+                Tu correo está verificado. ¿Cómo quieres usar ArtoCamello?
               </h1>
               <p className="text-gray-600 text-[18px]">
                 Personalizaremos tu experiencia según tus necesidades.
@@ -618,172 +662,42 @@ export function OnboardingPage() {
         )}
         
         {step === 2 && (
-          <>
-            {/* Header Step 2 */}
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="text-center w-full mb-10"
-            >
-              <h1 className="text-[#101828] text-[28px] md:text-[32px] font-bold leading-tight mb-3">
-                ¿Para qué planeas encargar servicios?
-              </h1>
-              <p className="text-gray-500 text-[16px] md:text-[18px]">
-                Hay algo para todos.
-              </p>
-            </motion.div>
-
-            {/* Cards Container Step 2 */}
-            <motion.div 
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mb-10"
-            >
-              {/* Card 1: Principal */}
-              <button
-                onClick={() => togglePurpose('principal')}
-                className={`relative flex flex-col h-[280px] p-6 rounded-xl border text-left transition-all duration-200 ${
-                  selectedPurposes.includes('principal')
-                    ? 'border-[#101828] ring-1 ring-[#101828] shadow-md' 
-                    : 'border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                <div className={`absolute top-6 right-6 w-[22px] h-[22px] rounded border flex items-center justify-center transition-colors ${
-                  selectedPurposes.includes('principal')
-                    ? 'bg-[#101828] border-[#101828]'
-                    : 'bg-white border-gray-400'
-                }`}>
-                  {selectedPurposes.includes('principal') && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
-                </div>
-
-                <div className="mt-8 mb-auto relative w-20 h-20">
-                  <div className="absolute inset-0 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
-                    <div className="h-4 border-b border-gray-200 flex items-center px-1.5 gap-1">
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                    </div>
-                    <div className="flex-1 flex gap-1 p-1.5 bg-white">
-                      <div className="flex-1 bg-[#FFCA0C] rounded-sm"></div>
-                      <div className="flex-1 bg-[#FFCA0C] rounded-sm"></div>
-                      <div className="flex-1 bg-[#FFCA0C] rounded-sm"></div>
-                      <div className="flex-1 bg-[#FFCA0C] rounded-sm"></div>
-                    </div>
-                  </div>
-                  <div className="absolute -top-3 -right-3 bg-white rounded-full p-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.1)] border border-gray-100">
-                    <Star className="w-4 h-4 text-[#101828]" fill="currentColor" />
-                  </div>
-                </div>
-
-                <h3 className="text-[#101828] text-[17px] font-bold mt-4 leading-snug">Trabajo o negocio<br/>principal</h3>
+          <form aria-labelledby="client-profile-heading" onSubmit={event => { event.preventDefault(); void handleNext(); }} className="w-full max-w-xl">
+            <h1 id="client-profile-heading" className="text-center text-3xl font-bold text-[#101828]">
+              Completa tu perfil de cliente
+            </h1>
+            <p className="mt-3 text-center text-gray-600">
+              Necesitamos tus datos de contacto para que puedas publicar solicitudes y recibir presupuestos.
+            </p>
+            <div className="mt-8 space-y-5 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
+              <div>
+                <label htmlFor="client-onboarding-name" className="mb-2 block text-sm font-semibold text-[#101828]">Nombre completo</label>
+                <input id="client-onboarding-name" type="text" autoComplete="name" required minLength={3} maxLength={100}
+                  value={clientData.fullName} onChange={event => setClientData(current => ({ ...current, fullName: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-[#101828] focus:outline-none focus:ring-2 focus:ring-[#FFCA0C]/40" />
+              </div>
+              <div>
+                <label htmlFor="client-onboarding-phone" className="mb-2 block text-sm font-semibold text-[#101828]">Tel&#233;fono de contacto</label>
+                <input id="client-onboarding-phone" type="tel" autoComplete="tel" required maxLength={25}
+                  value={clientData.phone} onChange={event => setClientData(current => ({ ...current, phone: event.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-[#101828] focus:outline-none focus:ring-2 focus:ring-[#FFCA0C]/40" />
+              </div>
+              <div>
+                <label htmlFor="client-onboarding-email" className="mb-2 block text-sm font-semibold text-[#101828]">Correo verificado</label>
+                <input id="client-onboarding-email" type="email" value={auth.email || ''} readOnly
+                  className="w-full rounded-lg border border-gray-200 bg-gray-100 px-4 py-3 text-gray-600" />
+                <p className="mt-2 text-xs text-gray-500">Confirmaste este correo mediante el enlace enviado durante el registro.</p>
+              </div>
+            </div>
+            <div className="mt-7 flex items-center justify-between gap-4">
+              <button type="button" onClick={() => setStep(1)} className="font-semibold text-[#101828] underline">Volver</button>
+              <button type="submit" disabled={isSubmitting}
+                className="rounded-lg bg-[#101828] px-6 py-3 font-semibold text-white disabled:opacity-60">
+                {isSubmitting ? 'Guardando...' : 'Crear mi perfil'}
               </button>
-
-              {/* Card 2: Secundarios */}
-              <button
-                onClick={() => togglePurpose('secundario')}
-                className={`relative flex flex-col h-[280px] p-6 rounded-xl border text-left transition-all duration-200 ${
-                  selectedPurposes.includes('secundario')
-                    ? 'border-[#101828] ring-1 ring-[#101828] shadow-md' 
-                    : 'border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                <div className={`absolute top-6 right-6 w-[22px] h-[22px] rounded border flex items-center justify-center transition-colors ${
-                  selectedPurposes.includes('secundario')
-                    ? 'bg-[#101828] border-[#101828]'
-                    : 'bg-white border-gray-400'
-                }`}>
-                  {selectedPurposes.includes('secundario') && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
-                </div>
-
-                <div className="mt-8 mb-auto relative w-20 h-20">
-                  <div className="absolute inset-0 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col overflow-hidden">
-                    <div className="h-4 border-b border-gray-200 flex items-center px-1.5 gap-1">
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                      <div className="w-[3px] h-[3px] bg-gray-400 rounded-full"></div>
-                    </div>
-                    <div className="flex-1 flex p-1.5 gap-1.5">
-                      <div className="w-1/3 bg-[#EAEAEA] rounded-sm"></div>
-                      <div className="flex-1 flex flex-col gap-1.5">
-                        <div className="flex-1 bg-[#FFCA0C] rounded-sm"></div>
-                        <div className="flex-1 bg-[#EAEAEA] rounded-sm"></div>
-                      </div>
-                      <div className="w-1/3 bg-[#EAEAEA] rounded-sm"></div>
-                    </div>
-                  </div>
-                  <div className="absolute -top-3 -right-3 bg-[#FFCA0C] text-[#101828] rounded-full p-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.15)] border-2 border-white">
-                    <Clock className="w-4 h-4" strokeWidth={3} />
-                  </div>
-                </div>
-
-                <h3 className="text-[#101828] text-[17px] font-bold mt-4 leading-snug">Negocios secundarios</h3>
-              </button>
-
-              {/* Card 3: Fuera del trabajo */}
-              <button
-                onClick={() => togglePurpose('fuera')}
-                className={`relative flex flex-col h-[280px] p-6 rounded-xl border text-left transition-all duration-200 ${
-                  selectedPurposes.includes('fuera')
-                    ? 'border-[#101828] ring-1 ring-[#101828] shadow-md' 
-                    : 'border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                <div className={`absolute top-6 right-6 w-[22px] h-[22px] rounded border flex items-center justify-center transition-colors ${
-                  selectedPurposes.includes('fuera')
-                    ? 'bg-[#101828] border-[#101828]'
-                    : 'bg-white border-gray-400'
-                }`}>
-                  {selectedPurposes.includes('fuera') && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
-                </div>
-
-                <div className="mt-8 mb-auto relative w-[60px] h-20 ml-2">
-                  <div className="absolute inset-0 bg-[#FFF3C4] rounded-lg shadow-sm border border-[#FFE580] flex flex-col items-center py-2">
-                    <div className="w-4 h-1 bg-white/80 rounded-full mb-1"></div>
-                    <div className="flex-1 w-full"></div>
-                    <div className="w-6 h-1 bg-white/80 rounded-full mt-1"></div>
-                  </div>
-                  <div className="absolute -top-3 -right-5 bg-[#FFCA0C] text-[#101828] rounded-full p-1.5 shadow-[0_2px_8px_rgba(0,0,0,0.15)] border-2 border-white">
-                    <User className="w-4 h-4" strokeWidth={3} />
-                  </div>
-                </div>
-
-                <h3 className="text-[#101828] text-[17px] font-bold mt-4 leading-snug">Necesidades fuera del<br/>trabajo</h3>
-              </button>
-            </motion.div>
-
-            {/* Footer actions Step 2 */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="w-full flex justify-between items-center mt-auto pt-6"
-            >
-              <button
-                onClick={() => setStep(1)}
-                className="flex items-center gap-2 text-[#101828] font-bold text-[15px] hover:text-gray-600 transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                Volver
-              </button>
-
-              <button
-                onClick={handleNext}
-                disabled={isSubmitting}
-                className={`px-8 py-2.5 rounded-md text-[15px] font-bold transition-all duration-200 ${
-                  selectedPurposes.length > 0
-                    ? 'bg-[#101828] text-white hover:bg-gray-800'
-                    : 'bg-[#F5F5F5] text-[#404145] hover:bg-[#EAEAEA]'
-                }`}
-              >
-                {selectedPurposes.length > 0 ? 'Siguiente' : 'Omitir'}
-              </button>
-            </motion.div>
-          </>
+            </div>
+          </form>
         )}
-
-
 
         {step === 5 && (
           <>

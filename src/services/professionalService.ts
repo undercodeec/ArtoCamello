@@ -32,6 +32,22 @@ export interface PublicProfessional {
   }>;
 }
 
+export async function getMyProfessionalProfile(): Promise<{
+  user: { fullName: string; phone: string | null; avatarUrl: string | null };
+  profile: {
+    businessName: string | null; bio: string; categories: string[]; experienceYears: number;
+    skills: string[]; city: string | null; address: string | null; documentType: string | null;
+    documentId: string | null; portfolioImages: string[];
+  } | null;
+}> {
+  const { token } = getCurrentAuth();
+  if (!token) throw new Error('Inicia sesión para cargar tu perfil.');
+  const response = await fetch(`${API_URL}/profile`, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo cargar tu perfil.');
+  return data;
+}
+
 /**
  * Publicar una reseña
  */
@@ -88,6 +104,7 @@ export async function updateProfessionalProfile(
     avatarUrl?: string;
     businessName?: string;
     bio?: string;
+    categories?: string[];
     experienceYears?: number;
     portfolioImages?: string[];
     skills?: string[];

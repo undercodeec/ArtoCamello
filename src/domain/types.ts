@@ -89,6 +89,10 @@ export interface ServiceRequest {
   title: string;
   description: string;
   location: string;
+  city?: string;
+  visibility?: 'direct' | 'marketplace' | 'legacy_unclassified';
+  targetProfessionalUserId?: string | null;
+  canEdit?: boolean;
   urgency: UrgencyLevel;
   preferredDate?: string;
   status: RequestStatus;
@@ -102,6 +106,14 @@ export interface ServiceRequest {
   createdAt: string;
   updatedAt: string;
 }
+
+export type ProfessionalRequestPreview = Pick<ServiceRequest,
+  'id' | 'categorySlug' | 'title' | 'urgency' | 'estimatedBudget' | 'purchaseCount' | 'createdAt' | 'status' | 'costUSD' | 'maxProfessionalsPerLead'
+> & { city: string | null; visibility: 'direct' | 'marketplace' };
+
+export type PublicServiceRequestPreview = Pick<ServiceRequest,
+  'id' | 'categorySlug' | 'title' | 'urgency' | 'estimatedBudget' | 'createdAt'
+> & { city: string | null };
 
 export interface LeadPurchase {
   id: string;

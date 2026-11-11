@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { User, MapPin, Bell, Save, Plus, Trash2, Edit2, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { getCurrentAuth } from '@/services/authService';
+import { useAuth } from '@/shared/context/AuthContext';
+import { requestPasswordReset } from '@/services/authService';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -13,7 +15,13 @@ interface Address {
 }
 
 export function ClientProfilePage() {
-  const [activeTab, setActiveTab] = useState<'personal' | 'addresses' | 'notifications'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'addresses' | 'notifications' | 'delete'>('personal');
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [accountProvider, setAccountProvider] = useState('local');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -55,6 +63,7 @@ export function ClientProfilePage() {
         email: data.user?.email || '',
         phone: data.user?.phone || ''
       });
+      setAccountProvider(data.user?.authProvider || 'local');
 
       if (data.profile?.addresses) {
         try {
@@ -123,6 +132,43 @@ export function ClientProfilePage() {
     setAddresses(addresses.map(a => a.id === id ? { ...a, [field]: value } : a));
   };
 
+  const handleDeleteAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (deleteConfirmation !== 'ELIMINAR' || !deletePassword || isDeleting) return;
+    setIsDeleting(true);
+    setErrorMsg('');
+    try {
+      const token = sessionStorage.getItem('authToken');
+      if (!token) throw new Error('Tu sesiÃ³n ha terminado. Inicia sesiÃ³n nuevamente.');
+      const response = await fetch(`${API_URL}/client/account`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ password: deletePassword, confirmation: deleteConfirmation }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo eliminar la cuenta.');
+      }
+      logout();
+      navigate('/', { replace: true });
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'No se pudo eliminar la cuenta.');
+    } finally {
+      setIsDeleting(false);
+      setDeletePassword('');
+    }
+  };
+
+  const handleRequestPassword = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      setSuccessMsg(await requestPasswordReset(personalData.email));
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'No se pudo enviar el enlace.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 pt-28 flex justify-center items-start">
@@ -139,14 +185,14 @@ export function ClientProfilePage() {
             <h1 className="text-3xl sm:text-4xl font-black text-[#101828] mb-2">Mi Perfil</h1>
             <p className="text-gray-500 text-lg">Gestiona tu información personal, direcciones y preferencias.</p>
           </div>
-          <button 
+          {activeTab !== 'delete' && <button
             onClick={handleSave}
             disabled={isSaving}
             className="hidden md:flex bg-[#101828] hover:bg-[#202c44] text-white font-bold py-2.5 px-6 rounded-lg transition-colors items-center gap-2"
           >
             {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
             Guardar todo
-          </button>
+          </button>}
         </div>
 
         {/* Notificaciones */}
@@ -191,6 +237,15 @@ export function ClientProfilePage() {
             >
               <Bell className="w-5 h-5" />
               Notificaciones
+            </button>
+            <button
+              onClick={() => { setActiveTab('delete'); setErrorMsg(''); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left font-medium transition-colors ${
+                activeTab === 'delete' ? 'bg-red-50 text-red-700' : 'text-red-600 hover:bg-red-50'
+              }`}
+            >
+              <Trash2 className="w-5 h-5" />
+              Eliminar cuenta
             </button>
           </div>
 
@@ -399,6 +454,44 @@ export function ClientProfilePage() {
                       Guardar cambios
                     </button>
                   </div>
+              </div>
+            )}
+
+            {activeTab === 'delete' && (
+              <div className="max-w-lg animate-in fade-in duration-300">
+                <h2 className="mb-4 text-2xl font-bold text-[#101828]">Eliminar mi cuenta</h2>
+                <p className="mb-4 text-sm leading-relaxed text-gray-600">
+                  Esta acciÃ³n es permanente. CerrarÃ¡ tu sesiÃ³n, eliminarÃ¡ tus datos de perfil y de contacto,
+                  y cerrarÃ¡ tus solicitudes. Se conservan registros de pagos y cotizaciones sin tus datos de contacto.
+                </p>
+                {accountProvider !== 'local' ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+                    <p className="mb-4 text-sm text-gray-700">Para confirmar tu identidad, establece primero una contraseÃ±a mediante el enlace que enviaremos a tu correo. DespuÃ©s inicia sesiÃ³n y vuelve a esta secciÃ³n.</p>
+                    <button type="button" onClick={handleRequestPassword} className="rounded-lg bg-[#101828] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#202c44]">
+                      Enviar enlace para establecer contraseÃ±a
+                    </button>
+                  </div>
+                ) : <form onSubmit={handleDeleteAccount} className="space-y-5 rounded-xl border border-red-200 bg-red-50 p-5">
+                  <div>
+                    <label htmlFor="delete-confirmation" className="mb-1 block text-sm font-semibold text-gray-800">
+                      Escribe ELIMINAR para confirmar
+                    </label>
+                    <input id="delete-confirmation" type="text" autoComplete="off" value={deleteConfirmation}
+                      onChange={event => setDeleteConfirmation(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-red-400" />
+                  </div>
+                  <div>
+                    <label htmlFor="delete-password" className="mb-1 block text-sm font-semibold text-gray-800">ContraseÃ±a actual</label>
+                    <input id="delete-password" type="password" autoComplete="current-password" value={deletePassword}
+                      onChange={event => setDeletePassword(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-red-400" />
+                  </div>
+                  <button type="submit" disabled={isDeleting || deleteConfirmation !== 'ELIMINAR' || !deletePassword}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-red-700 px-5 py-2.5 font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Eliminar mi cuenta definitivamente
+                  </button>
+                </form>}
               </div>
             )}
 

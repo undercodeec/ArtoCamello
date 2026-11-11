@@ -6,6 +6,7 @@ import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
 import { requestPasswordReset } from '@/services/authService';
+import { RecaptchaWidget, recaptchaConfigured } from '@/shared/components/RecaptchaWidget';
 
 interface SignUpModalProps {
   isOpen: boolean;
@@ -25,6 +26,8 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaReset, setCaptchaReset] = useState(0);
   const navigate = useNavigate();
   const { login, register } = useAuth();
 
@@ -62,7 +65,9 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         onClose();
         if (user.role === UserRole.PROFESSIONAL) navigate('/dashboard');
         else if (user.role === UserRole.GUEST) navigate('/onboarding');
+        else { const returnTo = sessionStorage.getItem('authReturnTo'); sessionStorage.removeItem('authReturnTo'); navigate(returnTo?.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/mis-solicitudes'); }
       } else {
+        if (recaptchaConfigured && !captchaToken) { setError('Completa la verificación de seguridad.'); return; }
         if (password !== confirmPassword) {
           setError('Las contraseñas no coinciden.');
           return;
@@ -73,6 +78,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
           password,
           fullName: localPart.length >= 2 ? localPart : 'Cliente',
           role: UserRole.GUEST,
+          ...(captchaToken ? { captchaToken } : {}),
         });
         trackMetaEvent('CompleteRegistration');
         if (result.requiresVerification) setSuccess(result.message);
@@ -80,6 +86,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ocurrió un error. Intenta nuevamente.');
+      setCaptchaReset(current => current + 1);
     } finally {
       setLoading(false);
     }
@@ -132,6 +139,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
               </div>
             ) : (
               <form className="space-y-4" onSubmit={handleSubmit}>
+                {view === 'signup' && <RecaptchaWidget onToken={setCaptchaToken} resetKey={captchaReset} />}
                 {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
                 <div>
                   <label htmlFor="auth-email" className="mb-1.5 block text-sm font-semibold text-[#404145]">Correo electrónico</label>

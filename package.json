@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "dev:server": "pnpm --dir server dev",
     "build:server": "pnpm --dir server build",
-    "test:integration": "pnpm --dir server test:integration"
+    "test:integration": "pnpm --dir server test:integration",
+    "test:seo": "node --test test/seo-files.test.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

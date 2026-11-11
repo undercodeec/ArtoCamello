@@ -12,6 +12,8 @@ import { getCurrentAuth } from '@/services/authService';
 import { createServiceRequest } from '@/services/requestService';
 import { UrgencyLevel, UserRole } from '@/domain/types';
 import { LocationMapPicker, type MapLocation } from './LocationMapPicker';
+import { serviceLabel } from '@/app/constants/serviceSearch';
+import { RecaptchaWidget, recaptchaConfigured } from '@/shared/components/RecaptchaWidget';
 
 const FALLBACK_IMAGES = [
   "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwd29ya2luZ3xlbnwxfHx8fDE3NzQwMTI5NzV8MA&ixlib=rb-4.1.0&q=80&w=1080",
@@ -120,6 +122,8 @@ export function ProProfilePage() {
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [requestError, setRequestError] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   const handleMapSelection = (location: MapLocation) => {
     setLocationCity(location.city);
@@ -156,6 +160,7 @@ export function ProProfilePage() {
       setRequestError('Indica un presupuesto estimado mayor a cero.');
       return;
     }
+    if (recaptchaConfigured && !captchaToken) { setRequestError('Completa la verificación de seguridad.'); return; }
 
     const category = pro.profile?.categories?.[0];
     if (!category) {
@@ -179,22 +184,27 @@ export function ProProfilePage() {
     try {
       setIsSubmittingRequest(true);
       await createServiceRequest({
+        visibility: 'direct',
+        targetProfessionalUserId: pro.id,
         categorySlug: category,
         title: `Solicitud de ${questionSet.title || category}`,
         description,
         location: `${locationAddress.trim()}, ${locationCity.trim()}`,
+        city: locationCity.trim(),
         urgency: UrgencyLevel.MEDIUM,
         ...(serviceDate ? { preferredDate: new Date(`${serviceDate}T12:00:00`).toISOString() } : {}),
         contactEmail: contactEmail.trim(),
         contactPhone: contactPhone.trim(),
         contactName: contactName.trim(),
         estimatedBudget: budget,
+        ...(captchaToken ? { captchaToken } : {}),
       });
       setIsDrawerOpen(false);
       navigate('/mis-solicitudes');
       toast.success('Solicitud enviada correctamente.');
     } catch (cause) {
       setRequestError(cause instanceof Error ? cause.message : 'No se pudo enviar la solicitud. Intenta nuevamente.');
+      setCaptchaReset(current => current + 1);
     } finally {
       setIsSubmittingRequest(false);
     }
@@ -263,7 +273,7 @@ export function ProProfilePage() {
     return <div className="flex justify-center items-center h-screen text-xl text-gray-400 font-medium">Profesional no encontrado o enlace incorrecto.</div>;
   }
 
-  const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicio de ${pro.profile.categories.join(', ')}` : "Servicios profesionales");
+  const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicio de ${pro.profile.categories.map(serviceLabel).join(', ')}` : "Servicios profesionales");
   const bio = pro.profile?.bio || `Profesional verificado en ArtoCamello con ${pro.profile?.experienceYears || 0} años de experiencia. Listo para brindar el mejor servicio a tu medida.`;
   const rating = pro.profile?.rating || 5.0;
   const reviews = pro.profile?.reviewCount || 0;
@@ -284,7 +294,7 @@ export function ProProfilePage() {
             <span className="mx-2">/</span>
             <a href="/search" className="hover:underline">Profesionales</a>
             <span className="mx-2">/</span>
-            <span className="text-gray-400 capitalize">{pro.profile?.categories?.[0] || 'Servicios'}</span>
+            <span className="text-gray-400 capitalize">{pro.profile?.categories?.[0] ? serviceLabel(pro.profile.categories[0]) : 'Servicios'}</span>
           </nav>
 
           {/* Title */}
@@ -1121,7 +1131,7 @@ export function ProProfilePage() {
                           ¿En qué email quieres recibir las propuestas y/o presupuestos?
                         </label>
                         <p className="text-xs text-gray-500 mb-2">
-                          No lo compartiremos con nadie salvo a los profesionales interesados.
+                          Solo este profesional lo verá después de desbloquear tu contacto.
                         </p>
                         <input 
                           type="email" 
@@ -1137,7 +1147,7 @@ export function ProProfilePage() {
                           Por favor, indica tu número de teléfono
                         </label>
                         <p className="text-xs text-gray-500 mb-2">
-                          Recibirás presupuestos más r��pido. No compartiremos tu teléfono.
+                          Este profesional podrá ver tu teléfono después de desbloquear el contacto.
                         </p>
                         <input 
                           type="tel" 
@@ -1156,6 +1166,7 @@ export function ProProfilePage() {
                   </div>
 
                   <div className="pt-6 border-t border-gray-100">
+                      <RecaptchaWidget onToken={setCaptchaToken} resetKey={captchaReset} />
                       {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
                       <button 
                         type="button"

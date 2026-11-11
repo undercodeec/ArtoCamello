@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, CheckCircle, XCircle, FileText, AlertCircle, Users, Star, ChevronRight } from 'lucide-react';
-import { Link, useNavigate } from 'react-router';
+import { PublishServiceForm } from './PublishServiceForm';
 import {
   ServiceRequest, RequestStatus, REQUEST_STATUS_LABELS,
   Quote, QuoteStatus, QUOTE_STATUS_LABELS,
 } from '@/domain/types';
 import { MAX_PROFESSIONALS_PER_REQUEST } from '@/domain/constants';
-import { listRequestsByClient, cancelRequest, completeRequest } from '@/services/requestService';
+import { listRequestsByClient, cancelRequest, completeRequest, updateServiceRequest } from '@/services/requestService';
 import { listQuotesByRequest, acceptQuote } from '@/services/quoteService';
 import { getReviewByRequest } from '@/services/reviewService';
 import { getCurrentAuth } from '@/services/authService';
@@ -17,8 +17,11 @@ export function MyRequestsPage() {
   const [loadError, setLoadError] = useState('');
   const [cancelModalOpen, setCancelModalOpen] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState<Partial<ServiceRequest>>({});
+  const [actionError, setActionError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [quotesMap, setQuotesMap] = useState<Record<string, Awaited<ReturnType<typeof listQuotesByRequest>>>>({});
-  const navigate = useNavigate();
   const auth = getCurrentAuth();
 
   useEffect(() => {
@@ -56,9 +59,30 @@ export function MyRequestsPage() {
   };
 
   const handleCancelRequest = async (id: string) => {
-    await cancelRequest(id);
-    setCancelModalOpen(null);
-    loadRequests();
+    try {
+      const result = await cancelRequest(id);
+      if (!result) throw new Error('No se pudo cancelar. Es posible que el estado haya cambiado.');
+      setCancelModalOpen(null);
+      await loadRequests();
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo cancelar.'); }
+  };
+
+  const saveEdit = async (id: string) => {
+    setActionError('');
+    setSaving(true);
+    try {
+      const budget = Number(editValues.estimatedBudget);
+      if (!Number.isFinite(budget) || budget <= 0) throw new Error('Indica un presupuesto mayor a cero.');
+      await updateServiceRequest(id, {
+        title: editValues.title?.trim(), description: editValues.description?.trim(), city: editValues.city?.trim(),
+        location: editValues.location?.trim(), urgency: editValues.urgency, estimatedBudget: budget,
+        ...(editValues.preferredDate ? { preferredDate: editValues.preferredDate } : {}),
+        contactName: editValues.contactName?.trim(), contactEmail: editValues.contactEmail?.trim(), contactPhone: editValues.contactPhone?.trim(),
+      });
+      setEditingId(null);
+      await loadRequests();
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo editar la solicitud.'); }
+    finally { setSaving(false); }
   };
 
   const handleAcceptQuote = async (quoteId: string) => {
@@ -96,15 +120,11 @@ export function MyRequestsPage() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl sm:text-4xl font-black text-[#101828] mb-2">Mis Solicitudes</h1>
-            <p className="text-gray-500 text-lg">Haz seguimiento al estado de los trabajos que has solicitado.</p>
+            <p className="text-gray-500 text-lg">Publica una necesidad y haz seguimiento a tus solicitudes.</p>
           </div>
-          <Link
-            to="/search"
-            className="bg-[#FFCA0C] hover:bg-[#e6b600] text-[#101828] font-bold py-3 px-6 rounded-lg transition-colors inline-flex items-center gap-2"
-          >
-            + Nueva solicitud
-          </Link>
         </div>
+        <PublishServiceForm onPublished={loadRequests} />
+        {actionError && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{actionError}</p>}
 
         {loadingRequests ? (
           <div role="status" className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-600">Cargando tus solicitudes...</div>
@@ -117,10 +137,7 @@ export function MyRequestsPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
             <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-[#101828] mb-2">Aún no tienes solicitudes</h3>
-            <p className="text-gray-500 mb-6">Cuando solicites un presupuesto, aparecerá aquí.</p>
-            <Link to="/search" className="inline-block bg-[#FFCA0C] hover:bg-[#e6b600] text-[#101828] font-bold py-3 px-6 rounded-lg transition-colors">
-              Solicitar presupuesto gratis
-            </Link>
+            <p className="text-gray-500">Completa el formulario de arriba para publicar tu primera solicitud.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -145,6 +162,7 @@ export function MyRequestsPage() {
                           </span>
                         </div>
                         <h2 className="text-xl font-bold text-[#101828]">{request.title}</h2>
+                        <p className="mt-1 text-xs font-semibold text-gray-500">{request.visibility === 'direct' ? 'Dirigida a un profesional' : 'Publicación general'}</p>
                       </div>
                       <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm font-semibold whitespace-nowrap ${getStatusConfig(request.status).color}`}>
                         <StatusIcon className="w-4 h-4" />
@@ -153,6 +171,19 @@ export function MyRequestsPage() {
                     </div>
 
                     <p className="text-gray-600 text-sm mb-6">{request.description}</p>
+                    {request.visibility === 'marketplace' && request.canEdit === true && (
+                      <div className="mb-4">
+                        {editingId !== request.id ? <button type="button" onClick={() => { setEditingId(request.id); setEditValues(request); setActionError(''); }} className="text-sm font-semibold text-blue-700 underline">Editar publicación</button> :
+                          <form onSubmit={e => { e.preventDefault(); saveEdit(request.id); }} className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
+                            {(['title', 'city', 'location', 'contactName', 'contactEmail', 'contactPhone'] as const).map(name => <label key={name} className="text-sm font-semibold">{({ title: 'Título', city: 'Ciudad', location: 'Dirección privada', contactName: 'Nombre', contactEmail: 'Correo', contactPhone: 'Teléfono' })[name]}<input required value={editValues[name] || ''} onChange={e => setEditValues(v => ({ ...v, [name]: e.target.value }))} className="mt-1 w-full rounded-lg border p-2" /></label>)}
+                            <label className="text-sm font-semibold">Urgencia<select value={editValues.urgency || 'medium'} onChange={e => setEditValues(v => ({ ...v, urgency: e.target.value as ServiceRequest['urgency'] }))} className="mt-1 w-full rounded-lg border p-2"><option value="low">Flexible</option><option value="medium">Próximos días</option><option value="high">Urgente</option></select></label>
+                            <label className="text-sm font-semibold">Presupuesto (USD)<input required type="number" min="0.01" step="0.01" value={editValues.estimatedBudget || ''} onChange={e => setEditValues(v => ({ ...v, estimatedBudget: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border p-2" /></label>
+                            <label className="text-sm font-semibold">Fecha preferida<input type="date" value={editValues.preferredDate?.slice(0, 10) || ''} onChange={e => setEditValues(v => ({ ...v, preferredDate: e.target.value ? new Date(`${e.target.value}T12:00:00`).toISOString() : undefined }))} className="mt-1 w-full rounded-lg border p-2" /></label>
+                            <label className="text-sm font-semibold sm:col-span-2">Descripción<textarea required value={editValues.description || ''} onChange={e => setEditValues(v => ({ ...v, description: e.target.value }))} className="mt-1 w-full rounded-lg border p-2" /></label>
+                            <div className="flex gap-3 sm:col-span-2"><button type="submit" disabled={saving} className="rounded-lg bg-[#101828] px-4 py-2 font-semibold text-white disabled:opacity-50">{saving ? 'Guardando...' : 'Guardar cambios'}</button><button type="button" onClick={() => setEditingId(null)} className="font-semibold text-gray-600">Cerrar</button></div>
+                          </form>}
+                      </div>
+                    )}
 
                     {/* Progress bar — always showing max 4 */}
                     {isActive(request.status) && (

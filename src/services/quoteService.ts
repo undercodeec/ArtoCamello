@@ -2,6 +2,7 @@
 // ArtoCamello — Quote Service
 // ====================================================================
 import { Quote } from '../domain/types';
+import { getCurrentAuth } from './authService';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
@@ -13,7 +14,7 @@ export interface SubmitQuotePayload {
 }
 
 function getAuthHeader() {
-  const token = localStorage.getItem('token');
+  const token = getCurrentAuth().token;
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {})

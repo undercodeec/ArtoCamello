@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /mi-perfil
+Disallow: /mis-solicitudes
+Disallow: /onboarding
+Disallow: /publicar-servicio
+Disallow: /recuperar-contrasena
+Disallow: /verificar-correo
+
+Sitemap: https://artocamello.com/sitemap.xml

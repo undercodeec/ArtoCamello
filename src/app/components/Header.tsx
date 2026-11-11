@@ -4,16 +4,13 @@ import { Link } from 'react-router';
 import { SignUpModal } from './SignUpModal';
 import { POPULAR_SERVICES } from '../constants/services';
 import logoArtocamello from '@/assets/logoartocamello.png';
-import { adminRequest, AdminMe } from '@/services/adminService';
 import { logout as logoutService } from '@/services/authService';
-import { adminUrl } from '@/app/adminHost';
 
 export function Header() {
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState(false);
   const [initialModalView, setInitialModalView] = useState<'login' | 'signup'>('signup');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userType, setUserType] = useState<string | null>(null);
-  const [hasAdmin, setHasAdmin] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileServicesOpen, setIsMobileServicesOpen] = useState(false);
 
@@ -21,8 +18,6 @@ export function Header() {
     const authStatus = sessionStorage.getItem('isAuthenticated') === 'true';
     setIsAuthenticated(authStatus);
     setUserType(sessionStorage.getItem('userType'));
-    setHasAdmin(false);
-    if (authStatus) adminRequest<AdminMe>('/me').then(() => setHasAdmin(true)).catch(() => setHasAdmin(false));
   };
 
   useEffect(() => {
@@ -94,10 +89,8 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
-            {hasAdmin && <a href={adminUrl()} className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Administración</a>}
-            {import.meta.env.DEV && <a href={adminUrl('/demo')} className="text-[#62646A] font-medium hover:text-[#FFCA0C]">Ver panel admin</a>}
 
-            {isAuthenticated && userType !== 'pro' && (
+            {isAuthenticated && userType === 'client' && (
               <>
                 <Link to="/mis-solicitudes" className="text-[#62646A] font-medium hover:text-[#FFCA0C] transition-colors">
                   Mis Solicitudes
@@ -187,10 +180,8 @@ export function Header() {
               ¿Eres un profesional?
             </Link>
 
-            {hasAdmin && <a href={adminUrl()} onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Administración</a>}
-            {import.meta.env.DEV && <a href={adminUrl('/demo')} onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">Ver panel admin</a>}
 
-            {isAuthenticated && userType !== 'pro' && (
+            {isAuthenticated && userType === 'client' && (
               <>
                 <Link to="/mis-solicitudes" onClick={() => setIsMobileMenuOpen(false)} className="block text-[#404145] font-semibold text-xl border-b border-gray-100 pb-2">
                   Mis Solicitudes
