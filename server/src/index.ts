@@ -179,10 +179,11 @@ app.post('/api/auth/verify-email', async (req: Request, res: Response): Promise<
       res.status(400).json({ error: 'Enlace inválido o vencido' }); return;
     }
     const user = await prisma.$transaction(async tx => {
+      const lockedUsers = await tx.$queryRaw<{ emailVerified: boolean; active: boolean }[]>`SELECT "emailVerified", "active" FROM "User" WHERE "id" = ${verification.userId} FOR UPDATE`;
+      if (!lockedUsers[0] || !lockedUsers[0].active || lockedUsers[0].emailVerified) return null;
       const consumed = await tx.emailVerificationToken.deleteMany({ where: { id: verification.id, tokenHash, expiresAt: { gt: new Date() } } });
       if (!consumed.count) return null;
-      const verified = await tx.user.updateMany({ where: { id: verification.userId, emailVerified: false }, data: { emailVerified: true } });
-      if (!verified.count) return null;
+      await tx.user.update({ where: { id: verification.userId }, data: { emailVerified: true } });
       await tx.emailVerificationToken.deleteMany({ where: { userId: verification.userId } });
       return tx.user.findUniqueOrThrow({ where: { id: verification.userId } });
     });

@@ -67,12 +67,21 @@ test('registration requires email confirmation before issuing a session', async 
     const successfulResend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
     assert.equal(successfulResend.status, 200, JSON.stringify(successfulResend.body));
     assert.equal(sentMail.length, 2);
+    const resendVerificationUrl = sentMail[1].text.match(/https?:\/\/\S+\/verificar-correo#token=[A-Za-z0-9_-]+/)?.[0];
+    assert.ok(resendVerificationUrl);
+    const resendVerificationToken = new URL(resendVerificationUrl).hash.slice('#token='.length);
     const prematureLogin = await call('/api/auth/login', 'POST', { email, password: 'strong-password-123' });
     assert.equal(prematureLogin.status, 403);
     const unverifiedToken = jwt.sign({ userId: user.id, sessionVersion: user.sessionVersion }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
     const prematureProfile = await call('/api/auth/role', 'POST', { role: 'client', fullName: 'Cliente Prueba', phone: '0991234567' }, unverifiedToken);
     assert.equal(prematureProfile.status, 403);
-    const confirmed = await call('/api/auth/verify-email', 'POST', { token: verificationToken });
+    const confirmations = await Promise.all([
+      call('/api/auth/verify-email', 'POST', { token: verificationToken }),
+      call('/api/auth/verify-email', 'POST', { token: resendVerificationToken }),
+    ]);
+    assert.deepEqual(confirmations.map(result => result.status).sort(), [200, 400]);
+    const confirmed = confirmations.find(result => result.status === 200);
+    assert.ok(confirmed);
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
     assert.equal(confirmed.body.user.emailVerified, true);
     assert.ok(confirmed.body.token);
