@@ -74,7 +74,12 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
       db.professionalProfile.create({ data: { userId: ids.pro2, tenantId: tenantA, bio: '', categories: ['test'], serviceZones: [], verified: true } }),
       db.professionalProfile.create({ data: { userId: ids.pro3, tenantId: tenantA, bio: '', categories: ['test'], serviceZones: [], verified: true } }),
     ]);
-    const [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead] = await Promise.all(['payments.read','payments.review','users.manage','admins.manage','users.read','dashboard.read','audit.read'].map(code => db.permission.findUniqueOrThrow({ where: { code } })));
+    const permissionCodes = ['payments.read','payments.review','users.manage','admins.manage','users.read','dashboard.read','audit.read'];
+    await db.permission.createMany({ data: permissionCodes.map(code => {
+      const [resource, action] = code.split('.');
+      return { code, resource, action, description: code };
+    }), skipDuplicates: true });
+    const [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead] = await Promise.all(permissionCodes.map(code => db.permission.findUniqueOrThrow({ where: { code } })));
     const roleA = await db.adminRole.create({ data: { tenantId: tenantA, code: 'reviewer', name: 'Reviewer', permissions: { create: [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead].map(permission => ({ permissionId: permission.id })) } } });
     const roleB = await db.adminRole.create({ data: { tenantId: tenantB, code: 'reader', name: 'Reader', permissions: { create: [{ permissionId: read.id }] } } });
     await db.tenantMembership.createMany({ data: [{ tenantId: tenantA, userId: ids.a, roleId: roleA.id }, { tenantId: tenantB, userId: ids.b, roleId: roleB.id }] });

@@ -1,6 +1,6 @@
 # ArtoCamello: estado actual y alcance comercial del primer MVP
 
-Actualizado: 5 de octubre de 2026. Este documento describe el código presente en este repositorio y separa lo implementado de las decisiones comerciales previstas. Para operar el panel, consulta también [ADMIN_OPERACION.md](../ADMIN_OPERACION.md); para requisitos de salida a producción, [PRODUCTION_CHECKLIST.md](../server/docs/PRODUCTION_CHECKLIST.md).
+Actualizado: 16 de noviembre de 2026. Este documento describe el código presente en este repositorio y separa lo implementado de las decisiones comerciales previstas. Para operar el panel, consulta también [ADMIN_OPERACION.md](../ADMIN_OPERACION.md); para requisitos de salida a producción, [PRODUCTION_CHECKLIST.md](../server/docs/PRODUCTION_CHECKLIST.md).
 
 ## Actualización del 10 de noviembre de 2026
 
@@ -56,9 +56,9 @@ Los estados de `Payment` son `created`, `awaiting_transfer`, `under_review`, `ap
 ## 5. Límites y decisiones pendientes antes de comercializar
 
 - La documentación antigua del README habla de billetera y créditos; el flujo vigente cobra directamente en USD por contacto. `walletService.ts` permanece como archivo heredado sin un sistema activo de recargas.
-- No se ha validado un pago real con credenciales comerciales de PayPhone ni Kushki. Kushki sigue deshabilitado por defecto. Los tests usan simulaciones.
-- Falta definir contractualmente si PayPhone será el proveedor definitivo, política de reembolso de cobros sin asignación, disputas, retención de comprobantes y condiciones comerciales visibles al profesional.
-- Faltan cuentas bancarias reales, escáner antivirus, backups comprobados, DNS/TLS productivos, alertas y ensayo de migración sobre datos reales. El resultado local de reconciliación 0/0 no valida historial de producción.
+- La validación comercial de PayPhone queda registrada como deuda técnica aceptada y no forma parte del cierre local actual. No debe activarse ni presentarse como método de pago disponible sin esa validación; Kushki continúa deshabilitado por defecto.
+- La restauración de una copia de la base de producción y su reconciliación contra datos reales también queda como deuda técnica aceptada. No sustituye las copias operativas ni la revisión previa a un despliegue de producción.
+- Siguen pendientes cuentas bancarias reales, escáner antivirus, backups comprobados, DNS/TLS productivos, alertas y las decisiones contractuales sobre reembolsos, disputas, retención de comprobantes y condiciones comerciales visibles al profesional.
 - La exportación de pagos del panel administrativo existe; el botón de exportar del historial del profesional todavía anuncia una funcionalidad futura.
 - La vista demo es una muestra de interfaz. Sus nombres, importes y registros no representan transacciones ni usuarios reales.
 

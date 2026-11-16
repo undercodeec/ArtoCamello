@@ -117,7 +117,7 @@ model ProfessionalProfile {
   categories      String[]
   serviceZones    String[]
   experienceYears Int      @default(0)
-  skills          String[]
+  skills          String[] @default([])
   city            String?
   address         String?
   documentType    String?

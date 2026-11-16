@@ -5,6 +5,7 @@
 - [x] Migraciones Prisma aplicadas en la base local; `prisma migrate status` al día.
 - [x] `pnpm prisma:reconcile` sin diferencias en la base local. Había **0 compras pagadas**, por lo que esto no prueba la migración histórica con datos reales.
 - [x] Compilación de servidor y frontend, y pruebas de integración de permisos, aislamiento por tenant, MFA, transferencias, PayPhone simulado, tarjeta simulada e idempotencia.
+- [x] En PostgreSQL limpio de Docker, `prisma migrate deploy` aplica las 14 migraciones y la suite de integración no requiere una base sembrada previamente.
 - [x] Límite distribuido de intentos de acceso y registro, con prueba de respuesta `429`.
 - [x] Pruebas de bloqueo del cambio de rol tras el onboarding, privacidad de perfiles públicos, reseñas aisladas por tenant y acceso autorizado a comprobantes.
 
@@ -12,11 +13,14 @@
 
 - [ ] Configurar `RECAPTCHA_SECRET_KEY` en la API y `VITE_RECAPTCHA_SITE_KEY` al construir el frontend; registrar los dominios públicos de cada tenant en reCAPTCHA y probar que el servidor rechaza un token de otro dominio. Comprobar la entrega SMTP y el enlace de verificación de correo antes de habilitar nuevos registros.
 - [ ] Antes de migrar solicitudes históricas en cuarentena (`legacy_unclassified`), revisar cuáles fueron enviadas desde un perfil profesional y obtener la decisión comercial de cada una. No publicar automáticamente una solicitud sin destinatario conocido.
-- [ ] Restaurar una copia reciente de la base de producción en un entorno aislado, aplicar migraciones y ejecutar `pnpm prisma:reconcile`. Comprobar conteos, importes y referencias de PayPhone antes del despliegue.
 - [ ] Configurar cuentas bancarias, SMTP, `CLAMSCAN_PATH`, `JWT_SECRET`, `MFA_ENCRYPTION_KEY`, copias de PostgreSQL y `server/private-proofs/`, y el dominio principal de cada tenant. Configurar DNS y TLS de `admin.artocamello.com`, publicar ahí el frontend, y definir `ADMIN_HOSTNAMES=admin.artocamello.com` en el API. Definir la política de retención de comprobantes y auditoría con el negocio.
-- [ ] Probar con credenciales del comercio los flujos aprobado, cancelado, monto incorrecto y retorno perdido de [PayPhone](PAYPHONE_PROVIDER.md). Confirmar que el dominio y el tiempo de confirmación funcionan como espera el proveedor.
 - [ ] Validar en UAT los casos de checkout, firma, moneda, importe, reintento, webhook tardío y Analytics de [Kushki](CARD_PROVIDER.md). Mantener `KUSHKI_CARD_ENABLED=false` y `cardEnabled=false` en producción hasta que la validación termine.
 - [ ] Ejecutar carga sostenida sobre una copia representativa, medir p95/p99 y errores, y revisar consultas lentas e índices según [monitorización](MONITORING.md). La prueba de 60 consultas concurrentes del repositorio es solo una regresión ligera.
 - [ ] Conectar los logs `payment_webhook_failed` a un recolector central y configurar alertas por tenant. Ensayar recuperación ante pérdida de webhook y resolución de tarjetas cobradas sin cupo.
 
 No se han realizado transacciones reales ni pruebas con cuentas de proveedor en este entorno.
+
+## Deuda técnica aceptada
+
+- [ ] PayPhone con credenciales comerciales: validar los flujos aprobado, cancelado, monto incorrecto y retorno perdido antes de habilitarlo para usuarios. Mientras tanto, no debe activarse ni anunciarse como medio de pago.
+- [ ] Restaurar una copia reciente de la base de producción en un entorno aislado, aplicar migraciones y ejecutar `pnpm prisma:reconcile`. Esta validación queda fuera del cierre local actual, pero debe hacerse antes de usar datos reales en un despliegue.
