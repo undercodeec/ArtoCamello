@@ -20,7 +20,7 @@ export function toProfessionalPreview(request: ServiceRequest, costUSD: number, 
   return {
     id: request.id,
     visibility: request.visibility,
-    city: request.city,
+    city: null,
     categorySlug: request.categorySlug,
     title: `Servicio de ${request.categorySlug}`,
     urgency: request.urgency,

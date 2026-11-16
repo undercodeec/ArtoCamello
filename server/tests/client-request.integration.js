@@ -19,8 +19,9 @@ test('a client request appears in client history and matching professional inbox
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const originalFetch = global.fetch;
+  let captchaAccepted = true;
   global.fetch = (url, options) => String(url) === 'https://www.google.com/recaptcha/api/siteverify'
-    ? Promise.resolve({ ok: true, json: async () => ({ success: true, hostname, challenge_ts: new Date().toISOString() }) })
+    ? Promise.resolve({ ok: true, json: async () => ({ success: captchaAccepted, hostname, challenge_ts: new Date().toISOString() }) })
     : originalFetch(url, options);
 
   try {
@@ -61,7 +62,7 @@ test('a client request appears in client history and matching professional inbox
       req.end();
     });
     const payload = {
-      visibility: 'marketplace', captchaToken: 'valid', city: 'Quito', categorySlug: 'fontaneria', title: 'Solicitud de Fontanería',
+      visibility: 'marketplace', captchaToken: 'valid', city: 'Quito, Calle privada 9, 0999999999', categorySlug: 'fontaneria', title: 'Solicitud de Fontanería',
       description: 'Reparar una gotera', location: 'Calle 1, Quito',
       urgency: 'medium', contactName: 'Contacto privado', contactPhone: '+593 999 999 999',
       contactEmail: `${clientId}@example.test`, estimatedBudget: 50,
@@ -78,7 +79,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(Number(saved.estimatedBudget), payload.estimatedBudget);
     assert.equal(saved.contactName, payload.contactName);
     assert.equal(saved.visibility, 'marketplace');
-    assert.equal(saved.city, 'Quito');
+    assert.equal(saved.city, payload.city);
 
     const listed = await request('/api/requests/client', 'GET', clientToken);
     assert.equal(listed.status, 200);
@@ -94,7 +95,8 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(visibleRequest.location, undefined);
     assert.equal(visibleRequest.description, undefined);
     assert.equal(visibleRequest.title, 'Servicio de fontaneria');
-    assert.equal(visibleRequest.city, 'Quito');
+    assert.equal(visibleRequest.city, null);
+    assert.ok(!JSON.stringify(visibleRequest).includes('Calle privada'));
 
     const noCategories = await request('/api/requests/available', 'GET', uncategorizedToken);
     assert.equal(noCategories.status, 200, noCategories.body);
@@ -190,10 +192,12 @@ test('a client request appears in client history and matching professional inbox
 
     const key = crypto.randomUUID();
     const first = await request('/api/requests', 'POST', clientToken, payload, { 'Idempotency-Key': key });
+    captchaAccepted = false;
     const repeated = await request('/api/requests', 'POST', clientToken, payload, { 'Idempotency-Key': key });
     assert.equal(first.status, 201, first.body);
     assert.equal(repeated.status, 200, repeated.body);
     assert.equal(JSON.parse(first.body).id, JSON.parse(repeated.body).id);
+    captchaAccepted = true;
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, title: 'Otro trabajo' }, { 'Idempotency-Key': key })).status, 409);
 
     const patch = await request(`/api/requests/${JSON.parse(first.body).id}`, 'PATCH', clientToken, { title: 'Nuevo título' });

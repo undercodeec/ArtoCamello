@@ -164,7 +164,7 @@ model ServiceRequest {
   client   User   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   visibility String @default("legacy_unclassified")
   targetProfessionalUserId String?
-  targetProfessional User? @relation("TargetProfessional", fields: [targetProfessionalUserId], references: [id])
+  targetProfessional User? @relation("TargetProfessional", fields: [targetProfessionalUserId], references: [id], onDelete: Restrict)
   city String?
   idempotencyKey String?
   payloadHash String?

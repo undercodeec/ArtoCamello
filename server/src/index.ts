@@ -203,12 +203,12 @@ app.post('/api/auth/resend-verification', async (req: Request, res: Response): P
     const user = await prisma.user.findFirst({ where: { email: { equals: email.trim(), mode: 'insensitive' }, tenantId, emailVerified: false, active: true } });
     if (user && process.env.SMTP_USER && process.env.SMTP_PASS) {
       const verification = createEmailVerificationToken();
-      await prisma.emailVerificationToken.upsert({ where: { userId: user.id }, create: { userId: user.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt }, update: { tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
       const baseUrl = await publicBaseUrl(prisma, tenantId, req.hostname);
       const verificationUrl = new URL('/verificar-correo', baseUrl);
       verificationUrl.hash = new URLSearchParams({ token: verification.token }).toString();
       try {
         await transporter.sendMail({ from: `"ArtoCamello Cuentas" <${smtpFrom()}>`, to: user.email, subject: 'Confirma tu correo en ArtoCamello', text: `Confirma tu correo en las próximas 24 horas: ${verificationUrl.toString()}` });
+        await prisma.emailVerificationToken.upsert({ where: { userId: user.id }, create: { userId: user.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt }, update: { tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
       } catch (error) { console.error('Error enviando reenvío de verificación:', error); }
     }
     res.status(200).json({ success: true, message: 'Si la cuenta necesita confirmación, enviaremos un nuevo enlace.' });
@@ -588,6 +588,20 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
     }
     const owner = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { emailVerified: true } });
     if (!owner?.emailVerified) { res.status(403).json({ error: 'Verifica tu correo antes de publicar' }); return; }
+    const retryKey = req.header('idempotency-key');
+    if (retryKey && body.visibility === 'marketplace' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(retryKey)) {
+      const retryFields = { visibility: body.visibility, targetProfessionalUserId: null,
+        categorySlug: body.categorySlug.trim(), title: body.title.trim(), description: body.description.trim(), city: body.city.trim(), location: body.location.trim(),
+        urgency: body.urgency, preferredDate: body.preferredDate ? new Date(body.preferredDate) : null,
+        contactPhone: body.contactPhone.trim(), contactEmail: body.contactEmail.trim(), contactName: body.contactName?.trim() || null,
+        estimatedBudget: Number(body.estimatedBudget) };
+      const retryHash = crypto.createHash('sha256').update(JSON.stringify(retryFields)).digest('hex');
+      const previous = await prisma.serviceRequest.findFirst({ where: { tenantId: req.user!.tenantId, clientId: req.user!.userId, idempotencyKey: retryKey } });
+      if (previous) {
+        if (previous.payloadHash !== retryHash) { res.status(409).json({ error: 'Clave de idempotencia ya utilizada con otro contenido' }); return; }
+        res.status(200).json(previous); return;
+      }
+    }
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const userLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-user', req.user!.tenantId, req.user!.userId], 20, 3600000);
     const ipLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-ip', req.user!.tenantId, ip], 60, 3600000);
@@ -661,7 +675,6 @@ app.get('/api/requests/public', async (req: Request, res: Response): Promise<voi
       select: {
         id: true,
         categorySlug: true,
-        city: true,
         urgency: true,
         estimatedBudget: true,
         createdAt: true,
@@ -671,6 +684,7 @@ app.get('/api/requests/public', async (req: Request, res: Response): Promise<voi
     });
     res.status(200).json(requests.map(request => ({
       ...request,
+      city: null,
       title: `Servicio de ${request.categorySlug}`,
     })));
   } catch (error) {

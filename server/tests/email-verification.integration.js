@@ -8,8 +8,13 @@ process.env.SMTP_USER = process.env.SMTP_USER || 'test@example.test';
 process.env.SMTP_PASS = process.env.SMTP_PASS || 'test-password';
 process.env.RECAPTCHA_SECRET_KEY = 'test-secret';
 const sentMail = [];
+let failMailDelivery = false;
 const nodemailer = require('nodemailer');
-nodemailer.createTransport = () => ({ sendMail: async message => { sentMail.push(message); return { accepted: [message.to] }; } });
+nodemailer.createTransport = () => ({ sendMail: async message => {
+  if (failMailDelivery) throw new Error('SMTP temporalmente no disponible');
+  sentMail.push(message);
+  return { accepted: [message.to] };
+} });
 const { app, prisma } = require('../dist/index.js');
 
 test('registration requires email confirmation before issuing a session', async () => {
@@ -54,6 +59,10 @@ test('registration requires email confirmation before issuing a session', async 
     const verificationUrl = sentMail[0].text.match(/https?:\/\/\S+\/verificar-correo#token=[A-Za-z0-9_-]+/)?.[0];
     assert.ok(verificationUrl);
     const verificationToken = new URL(verificationUrl).hash.slice('#token='.length);
+    failMailDelivery = true;
+    const resend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
+    assert.equal(resend.status, 200, JSON.stringify(resend.body));
+    failMailDelivery = false;
     const prematureLogin = await call('/api/auth/login', 'POST', { email, password: 'strong-password-123' });
     assert.equal(prematureLogin.status, 403);
     const unverifiedToken = jwt.sign({ userId: user.id, sessionVersion: user.sessionVersion }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
@@ -83,6 +92,7 @@ test('registration requires email confirmation before issuing a session', async 
     const login = await call('/api/auth/login', 'POST', { email, password: 'strong-password-123' });
     assert.equal(login.status, 200, JSON.stringify(login.body));
   } finally {
+    failMailDelivery = false;
     global.fetch = originalFetch;
     await new Promise(resolve => server.close(resolve));
     await prisma.user.deleteMany({ where: { tenantId } });
