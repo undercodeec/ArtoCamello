@@ -4,8 +4,15 @@ import type { TenantSettings } from './payments';
 
 export const OPEN_REQUEST_STATUSES = ['matching', 'contact_limit_open', 'contact_limit_reached', 'quotes_received'] as const;
 const SERVICE_CATEGORIES = new Set('albanileria jardineria mantenimiento pintura fontaneria electricidad limpieza carpinteria adiestrador-canino entrenador-personal mudanzas alquiler-furgonetas psicologia reformas cuidado-ninos cuidado-mayores cuidado-mascotas reparacion-electrodomesticos asesoria-fiscal servicios-legales fumigacion instalacion-pisos diseno-interiores cerrajeria climatizacion'.split(' '));
+const PUBLIC_CITIES = ['Ambato', 'Cuenca', 'Esmeraldas', 'Guayaquil', 'Ibarra', 'Latacunga', 'Loja', 'Machala', 'Manta', 'Portoviejo', 'Quito', 'Riobamba', 'Santo Domingo'].map(city => [city.toLocaleLowerCase('es-EC'), city] as const);
+const publicCitiesByNormalizedName = new Map(PUBLIC_CITIES);
 export const isOpenRequest = (status: string) => OPEN_REQUEST_STATUSES.some(value => value === status);
 export const isPurchasableRequest = (status: string) => status === 'matching' || status === 'contact_limit_open';
+
+export function publicCity(city: string | null): string | null {
+  if (!city) return null;
+  return publicCitiesByNormalizedName.get(city.trim().toLocaleLowerCase('es-EC')) || null;
+}
 
 export function canProfessionalAccessRequest(request: ServiceRequest, professionalUserId: string, professionalCategories: string[], tenantId: string): boolean {
   if (request.tenantId !== tenantId || !hasServiceCategory(professionalCategories, request.categorySlug)) return false;
@@ -20,7 +27,7 @@ export function toProfessionalPreview(request: ServiceRequest, costUSD: number, 
   return {
     id: request.id,
     visibility: request.visibility,
-    city: null,
+    city: publicCity(request.city),
     categorySlug: request.categorySlug,
     title: `Servicio de ${request.categorySlug}`,
     urgency: request.urgency,

@@ -15,7 +15,7 @@ import { PayPhoneProvider } from './payphoneProvider';
 import { kushkiWebhookRouter } from './kushkiWebhook';
 import { clearAuthAttempt, consumeAuthAttempt, pruneAuthAttempts } from './authThrottle';
 import { canonicalServiceCategories, hasServiceCategory } from './serviceCategories';
-import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isPurchasableRequest, purchaseLimitForRequest, toProfessionalPreview, validRequestFields } from './requestPolicy';
+import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isPurchasableRequest, publicCity, purchaseLimitForRequest, toProfessionalPreview, validRequestFields } from './requestPolicy';
 import { CaptchaConfigurationError, verifyRecaptcha } from './captcha';
 import { createEmailVerificationToken, verifyEmailVerificationToken } from './emailVerification';
 import { escapeHtml } from './htmlEscape';
@@ -181,7 +181,10 @@ app.post('/api/auth/verify-email', async (req: Request, res: Response): Promise<
     const user = await prisma.$transaction(async tx => {
       const consumed = await tx.emailVerificationToken.deleteMany({ where: { id: verification.id, tokenHash, expiresAt: { gt: new Date() } } });
       if (!consumed.count) return null;
-      return tx.user.update({ where: { id: verification.userId }, data: { emailVerified: true } });
+      const verified = await tx.user.updateMany({ where: { id: verification.userId, emailVerified: false }, data: { emailVerified: true } });
+      if (!verified.count) return null;
+      await tx.emailVerificationToken.deleteMany({ where: { userId: verification.userId } });
+      return tx.user.findUniqueOrThrow({ where: { id: verification.userId } });
     });
     if (!user) { res.status(400).json({ error: 'Enlace ya utilizado' }); return; }
     const { password: _password, verificationToken: _verificationToken, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, mfaFailureCount: _mfaFailures, mfaLockedUntil: _mfaLock, ...safeUser } = user;
@@ -206,10 +209,15 @@ app.post('/api/auth/resend-verification', async (req: Request, res: Response): P
       const baseUrl = await publicBaseUrl(prisma, tenantId, req.hostname);
       const verificationUrl = new URL('/verificar-correo', baseUrl);
       verificationUrl.hash = new URLSearchParams({ token: verification.token }).toString();
+      let createdVerificationId: string | null = null;
       try {
+        const createdVerification = await prisma.emailVerificationToken.create({ data: { userId: user.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
+        createdVerificationId = createdVerification.id;
         await transporter.sendMail({ from: `"ArtoCamello Cuentas" <${smtpFrom()}>`, to: user.email, subject: 'Confirma tu correo en ArtoCamello', text: `Confirma tu correo en las próximas 24 horas: ${verificationUrl.toString()}` });
-        await prisma.emailVerificationToken.upsert({ where: { userId: user.id }, create: { userId: user.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt }, update: { tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });
-      } catch (error) { console.error('Error enviando reenvío de verificación:', error); }
+      } catch (error) {
+        if (createdVerificationId) await prisma.emailVerificationToken.deleteMany({ where: { id: createdVerificationId } });
+        console.error('Error enviando reenvío de verificación:', error);
+      }
     }
     res.status(200).json({ success: true, message: 'Si la cuenta necesita confirmación, enviaremos un nuevo enlace.' });
   } catch (error) { console.error('Error resending email verification:', error); res.status(500).json({ error: 'Error al solicitar el enlace' }); }
@@ -675,6 +683,7 @@ app.get('/api/requests/public', async (req: Request, res: Response): Promise<voi
       select: {
         id: true,
         categorySlug: true,
+        city: true,
         urgency: true,
         estimatedBudget: true,
         createdAt: true,
@@ -684,7 +693,7 @@ app.get('/api/requests/public', async (req: Request, res: Response): Promise<voi
     });
     res.status(200).json(requests.map(request => ({
       ...request,
-      city: null,
+      city: publicCity(request.city),
       title: `Servicio de ${request.categorySlug}`,
     })));
   } catch (error) {

@@ -33,7 +33,7 @@ test('public request discovery exposes only anonymized open marketplace requests
     await prisma.professionalProfile.create({ data: { tenantId, userId: professionalId, bio: 'Perfil de prueba', categories: ['fontaneria'], serviceZones: ['Quito'] } });
     const publicRequest = await prisma.serviceRequest.create({ data: {
       tenantId, clientId, visibility: 'marketplace', categorySlug: 'fontaneria', title: 'Reparar fuga en mi casa',
-      description: 'Mi domicilio y el detalle privado', city: 'Quito, Calle privada 123', location: 'Calle privada 123', urgency: 'high',
+      description: 'Mi domicilio y el detalle privado', city: 'Quito', location: 'Calle privada 123', urgency: 'high',
       contactName: 'Cliente privado', contactPhone: '+593999999999', contactEmail: `${clientId}@example.test`, estimatedBudget: 80, status: 'contact_limit_open',
     } });
     await prisma.serviceRequest.createMany({ data: [
@@ -48,7 +48,7 @@ test('public request discovery exposes only anonymized open marketplace requests
       id: publicRequest.id,
       categorySlug: 'fontaneria',
       title: 'Servicio de fontaneria',
-      city: null,
+      city: 'Quito',
       urgency: 'high',
       estimatedBudget: 80,
       createdAt: publicRequest.createdAt.toJSON(),

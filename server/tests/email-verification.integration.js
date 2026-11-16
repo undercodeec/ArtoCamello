@@ -62,7 +62,11 @@ test('registration requires email confirmation before issuing a session', async 
     failMailDelivery = true;
     const resend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
     assert.equal(resend.status, 200, JSON.stringify(resend.body));
+    assert.equal(await prisma.emailVerificationToken.count({ where: { userId: user.id } }), 1);
     failMailDelivery = false;
+    const successfulResend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
+    assert.equal(successfulResend.status, 200, JSON.stringify(successfulResend.body));
+    assert.equal(sentMail.length, 2);
     const prematureLogin = await call('/api/auth/login', 'POST', { email, password: 'strong-password-123' });
     assert.equal(prematureLogin.status, 403);
     const unverifiedToken = jwt.sign({ userId: user.id, sessionVersion: user.sessionVersion }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
@@ -72,6 +76,7 @@ test('registration requires email confirmation before issuing a session', async 
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
     assert.equal(confirmed.body.user.emailVerified, true);
     assert.ok(confirmed.body.token);
+    assert.equal(await prisma.emailVerificationToken.count({ where: { userId: user.id } }), 0);
     const incompleteProfile = await call('/api/auth/role', 'POST', { role: 'client' }, confirmed.body.token);
     assert.equal(incompleteProfile.status, 400);
     const invalidPhone = await call('/api/auth/role', 'POST', { role: 'client', fullName: 'Ana Cliente', phone: 'abc' }, confirmed.body.token);

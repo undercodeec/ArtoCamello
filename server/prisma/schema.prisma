@@ -62,7 +62,7 @@ model User {
   memberships        TenantMembership[]
   adminAccessCodes   AdminAccessCode[]
   passwordResetToken PasswordResetToken?
-  emailVerificationToken EmailVerificationToken?
+  emailVerificationTokens EmailVerificationToken[]
   payments           Payment[]
   auditActions       AuditLog[]
   submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
@@ -84,11 +84,13 @@ model PasswordResetToken {
 
 model EmailVerificationToken {
   id String @id @default(uuid())
-  userId String @unique
+  userId String
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String @unique @db.VarChar(64)
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  @@index([userId])
   @@index([expiresAt])
 }
 

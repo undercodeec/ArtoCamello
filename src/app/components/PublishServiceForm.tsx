@@ -91,7 +91,7 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
         {field('title', 'Título de la necesidad')}
         <div><label htmlFor="publish-description" className="mb-1 block text-sm font-semibold">Descripción</label>
           <textarea id="publish-description" value={values.description} onChange={e => set('description', e.target.value)} required rows={4} className="w-full rounded-lg border border-gray-300 px-4 py-3" /></div>
-        <div className="grid gap-5 sm:grid-cols-2">{field('city', 'Ciudad')}{field('location', 'Dirección privada')}</div>
+        <div className="grid gap-5 sm:grid-cols-2"><div>{field('city', 'Ciudad')}<p className="mt-1 text-xs text-gray-500">Escribe solo la ciudad (por ejemplo, Quito); la dirección se mantiene privada.</p></div>{field('location', 'Dirección privada')}</div>
         <div className="grid gap-5 sm:grid-cols-2"><div><label htmlFor="publish-urgency" className="mb-1 block text-sm font-semibold">Urgencia</label>
           <select id="publish-urgency" value={values.urgency} onChange={e => set('urgency', e.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-3">
             <option value="low">Flexible</option><option value="medium">Próximos días</option><option value="high">Lo antes posible</option>
