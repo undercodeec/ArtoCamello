@@ -148,11 +148,11 @@ Para producción, cree el DNS de `admin.artocamello.com` hacia el frontend, incl
 
 Consulta [ADMIN_OPERACION.md](ADMIN_OPERACION.md) para migraciones, roles, cuenta inicial, configuración bancaria y conciliación. La integración provisional de tarjeta con Kushki y sus requisitos de activación están en [server/docs/CARD_PROVIDER.md](server/docs/CARD_PROVIDER.md). Los pasos pendientes antes de producción están en [server/docs/PRODUCTION_CHECKLIST.md](server/docs/PRODUCTION_CHECKLIST.md).
 
-## Recuperación de contraseña de clientes
+## Recuperación de contraseña de cuentas
 
 Antes de publicar esta función, aplica la migración Prisma `20261026000000_client_password_reset` en la base de datos de la API. El correo usa `SMTP_USER` y `SMTP_PASS` del entorno del servidor. Para un SMTP propio configura también `SMTP_HOST`, `SMTP_PORT` (por ejemplo `465`) y, si hace falta, `SMTP_SECURE=true`; `SMTP_FROM` es opcional. Sin `SMTP_HOST`, se conserva el transporte Gmail anterior. `APP_BASE_URL` debe apuntar al sitio público HTTPS para construir el enlace de recuperación.
 
-La solicitud acepta únicamente cuentas activas con rol `client` y contraseña local. El enlace vence en 30 minutos, se usa una sola vez y cambiar la contraseña invalida las sesiones anteriores. El sitio administrativo mantiene su flujo de acceso independiente.
+La solicitud comprueba que el correo esté registrado en el tenant y que la cuenta esté activa y verificada. Si no existe, el formulario ofrece crear una cuenta; si SMTP falla o rechaza al destinatario, muestra un error de envío. El enlace vence en 30 minutos, se usa una sola vez y cambiar la contraseña invalida las sesiones anteriores. El sitio administrativo mantiene su flujo de acceso independiente.
 
 ## Otros pendientes
 

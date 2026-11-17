@@ -270,8 +270,7 @@ app.post('/api/auth/login', async (req: Request, res: Response): Promise<void> =
   }
 });
 
-// La respuesta de solicitud es la misma para correos inexistentes y roles no elegibles.
-const resetRequestMessage = 'Si existe una cuenta cliente activa con ese correo, recibirás un enlace para restablecer tu contraseña.';
+const resetRequestMessage = 'Te enviamos un enlace para restablecer tu contraseña. Revisa tu correo.';
 const resetTokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
 app.post('/api/auth/forgot-password', async (req: Request, res: Response): Promise<void> => {
@@ -291,30 +290,35 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response): Promi
     if (!ipLimit.allowed || !accountLimit.allowed) {
       res.setHeader('Retry-After', String(Math.max(ipLimit.retryAfterSeconds, accountLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiados intentos. Espera antes de solicitar otro enlace.' }); return;
     }
+    const user = await prisma.user.findFirst({ where: { tenantId, email: { equals: normalizedEmail, mode: 'insensitive' } } });
+    if (!user) { res.status(404).json({ code: 'EMAIL_NOT_REGISTERED', error: 'Este correo no está registrado. Puedes crear una cuenta.' }); return; }
+    if (!user.active) { res.status(403).json({ error: 'Esta cuenta no está activa. Contacta a soporte.' }); return; }
+    if (!user.emailVerified) { res.status(409).json({ code: 'EMAIL_NOT_VERIFIED', error: 'Confirma tu correo antes de restablecer la contraseña.' }); return; }
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) { res.status(503).json({ error: 'El envío de correo no está disponible temporalmente.' }); return; }
 
-    const user = await prisma.user.findFirst({ where: { tenantId, email: { equals: email.trim(), mode: 'insensitive' }, role: 'client', active: true, emailVerified: true } });
-    if (user) {
-      const token = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-      await prisma.passwordResetToken.upsert({
-        where: { userId: user.id },
-        create: { userId: user.id, tokenHash: resetTokenHash(token), expiresAt },
-        update: { tokenHash: resetTokenHash(token), expiresAt },
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await prisma.passwordResetToken.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, tokenHash: resetTokenHash(token), expiresAt },
+      update: { tokenHash: resetTokenHash(token), expiresAt },
+    });
+    const resetUrl = new URL('/recuperar-contrasena', await publicBaseUrl(prisma, tenantId, req.hostname));
+    resetUrl.hash = new URLSearchParams({ token }).toString();
+    try {
+      const delivery = await transporter.sendMail({
+        from: `"ArtoCamello Cuentas" <${smtpFrom()}>`,
+        to: user.email,
+        subject: 'Restablece tu contraseña de ArtoCamello',
+        text: `Solicitaste cambiar la contraseña de tu cuenta. Abre este enlace para continuar:\n${resetUrl.toString()}\n\nEl enlace vence en 30 minutos y solo puede usarse una vez. Si no solicitaste el cambio, ignora este mensaje.`,
       });
-      const resetUrl = new URL('/recuperar-contrasena', APP_BASE_URL);
-      resetUrl.hash = new URLSearchParams({ token }).toString();
-      try {
-        await transporter.sendMail({
-          from: `"ArtoCamello Cuentas" <${smtpFrom()}>`,
-          to: user.email,
-          subject: 'Restablece tu contraseña de ArtoCamello',
-          text: `Solicitaste cambiar la contraseña de tu cuenta cliente. Abre este enlace para continuar:\n${resetUrl.toString()}\n\nEl enlace vence en 30 minutos y solo puede usarse una vez. Si no solicitaste el cambio, ignora este mensaje.`,
-        });
-      } catch (mailError) {
-        await prisma.passwordResetToken.deleteMany({ where: { userId: user.id, tokenHash: resetTokenHash(token) } });
-        console.error('Error enviando recuperación de contraseña:', mailError);
+      if (!delivery.accepted?.some((recipient: string) => recipient.toLowerCase() === user.email.toLowerCase())) {
+        throw new Error('El servidor SMTP no aceptó el destinatario');
       }
+    } catch (mailError) {
+      await prisma.passwordResetToken.deleteMany({ where: { userId: user.id, tokenHash: resetTokenHash(token) } });
+      console.error('Error enviando recuperación de contraseña:', mailError);
+      res.status(503).json({ error: 'No se pudo enviar el correo de recuperación. Intenta nuevamente más tarde.' }); return;
     }
     res.json({ message: resetRequestMessage });
   } catch (error) {
@@ -339,7 +343,7 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response): Promis
     const hashedPassword = await bcrypt.hash(password, 10);
     const changed = await prisma.$transaction(async tx => {
       const record = await tx.passwordResetToken.findUnique({ where: { tokenHash }, include: { user: true } });
-      if (!record || record.expiresAt <= new Date() || record.user.tenantId !== tenantId || record.user.role !== 'client' || !record.user.active || !record.user.emailVerified) return false;
+      if (!record || record.expiresAt <= new Date() || record.user.tenantId !== tenantId || !record.user.active || !record.user.emailVerified) return false;
       const consumed = await tx.passwordResetToken.deleteMany({ where: { id: record.id, tokenHash, expiresAt: { gt: new Date() } } });
       if (consumed.count !== 1) return false;
       await tx.user.update({ where: { id: record.userId }, data: { password: hashedPassword, authProvider: 'local', sessionVersion: { increment: 1 } } });

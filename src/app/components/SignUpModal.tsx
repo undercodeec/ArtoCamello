@@ -5,7 +5,7 @@ import illustration from 'figma:asset/62a7846a80b09f8084074694693eb26e2a63983f.p
 import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
-import { requestPasswordReset } from '@/services/authService';
+import { RecoveryEmailNotRegisteredError, requestPasswordReset } from '@/services/authService';
 import { RecaptchaWidget, recaptchaConfigured } from '@/shared/components/RecaptchaWidget';
 
 interface SignUpModalProps {
@@ -25,6 +25,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [emailNotRegistered, setEmailNotRegistered] = useState(false);
   const [success, setSuccess] = useState('');
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaReset, setCaptchaReset] = useState(0);
@@ -41,6 +42,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
     setConfirmPassword('');
     setShowPassword(false);
     setError('');
+    setEmailNotRegistered(false);
     setSuccess('');
     return () => { document.body.style.overflow = previousOverflow; };
   }, [isOpen, initialView]);
@@ -48,6 +50,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
   const changeView = (next: View) => {
     setView(next);
     setError('');
+    setEmailNotRegistered(false);
     setSuccess('');
     setPassword('');
     setConfirmPassword('');
@@ -57,6 +60,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
     event.preventDefault();
     setLoading(true);
     setError('');
+    setEmailNotRegistered(false);
     try {
       if (view === 'recovery') {
         setSuccess(await requestPasswordReset(email.trim()));
@@ -86,6 +90,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ocurrió un error. Intenta nuevamente.');
+      setEmailNotRegistered(cause instanceof RecoveryEmailNotRegisteredError);
       setCaptchaReset(current => current + 1);
     } finally {
       setLoading(false);
@@ -140,7 +145,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
             ) : (
               <form className="space-y-4" onSubmit={handleSubmit}>
                 {view === 'signup' && <RecaptchaWidget onToken={setCaptchaToken} resetKey={captchaReset} />}
-                {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+                {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><p>{error}</p>{emailNotRegistered && <button type="button" onClick={() => changeView('signup')} className="mt-2 font-semibold underline underline-offset-2">Crear una cuenta</button>}</div>}
                 <div>
                   <label htmlFor="auth-email" className="mb-1.5 block text-sm font-semibold text-[#404145]">Correo electrónico</label>
                   <input id="auth-email" type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="nombre@email.com" autoComplete="email" className={fieldClass} required />

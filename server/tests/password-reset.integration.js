@@ -10,8 +10,10 @@ process.env.SMTP_USER = 'test@example.test';
 process.env.SMTP_PASS = 'test-only';
 process.env.APP_BASE_URL = 'https://artocamello.example.test';
 const sent = [];
+let failMailDelivery = false;
+let rejectMailDelivery = false;
 const originalCreateTransport = nodemailer.createTransport;
-nodemailer.createTransport = () => ({ sendMail: async message => { sent.push(message); } });
+nodemailer.createTransport = () => ({ sendMail: async message => { if (failMailDelivery) throw new Error('SMTP unavailable'); if (rejectMailDelivery) return { accepted: [], rejected: [message.to] }; sent.push(message); return { accepted: [message.to] }; } });
 const { app, prisma } = require('../dist/index.js');
 nodemailer.createTransport = originalCreateTransport;
 
@@ -49,19 +51,26 @@ test('client recovery is tenant scoped, single use and invalidates previous sess
     const socialClient = await prisma.user.create({ data: { tenantId: tenantA, email: `social-${suffix}@example.test`, fullName: 'Cliente social', role: 'client', authProvider: 'google', password: null, emailVerified: true } });
     const pro = await prisma.user.create({ data: { tenantId: tenantA, email: `pro-${suffix}@example.test`, fullName: 'Profesional', role: 'pro', password: passwordHash, emailVerified: true } });
     const guest = await prisma.user.create({ data: { tenantId: tenantA, email: `guest-${suffix}@example.test`, fullName: 'Pendiente', role: 'guest', password: passwordHash, emailVerified: true } });
+    const unverified = await prisma.user.create({ data: { tenantId: tenantA, email: `unverified-${suffix}@example.test`, fullName: 'Sin verificar', role: 'guest', password: passwordHash, emailVerified: false } });
     const oldSession = jwt.sign({ userId: client.id, role: 'client', sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me');
 
     const unknown = await request(base, hostA, '/api/auth/forgot-password', { email: `missing-${suffix}@example.test` });
     const professional = await request(base, hostA, '/api/auth/forgot-password', { email: pro.email });
     const unclassified = await request(base, hostA, '/api/auth/forgot-password', { email: guest.email });
     const clientRequest = await request(base, hostA, '/api/auth/forgot-password', { email: client.email.toUpperCase() });
-    assert.equal(unknown.status, 200);
-    assert.deepEqual(professional.body, unknown.body);
-    assert.deepEqual(unclassified.body, unknown.body);
-    assert.deepEqual(clientRequest.body, unknown.body);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].to, client.email);
-    const url = new URL(sent[0].text.match(/https:\/\/\S+/)[0]);
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.body.code, 'EMAIL_NOT_REGISTERED');
+    assert.equal(professional.status, 200);
+    assert.equal(unclassified.status, 200);
+    assert.equal(clientRequest.status, 200);
+    assert.equal(sent.length, 3);
+    assert.deepEqual(sent.map(message => message.to), [pro.email, guest.email, client.email]);
+    const proToken = new URLSearchParams(new URL(sent[0].text.match(/https:\/\/\S+/)[0]).hash.slice(1)).get('token');
+    assert.equal((await request(base, hostA, '/api/auth/reset-password', { token: proToken, password: 'new-pro-password' })).status, 200);
+    const pending = await request(base, hostA, '/api/auth/forgot-password', { email: unverified.email });
+    assert.equal(pending.status, 409);
+    assert.equal(pending.body.code, 'EMAIL_NOT_VERIFIED');
+    const url = new URL(sent[2].text.match(/https:\/\/\S+/)[0]);
     assert.equal(url.pathname, '/recuperar-contrasena');
     const token = new URLSearchParams(url.hash.slice(1)).get('token');
     assert.match(token, /^[a-f0-9]{64}$/);
@@ -77,9 +86,20 @@ test('client recovery is tenant scoped, single use and invalidates previous sess
     assert.equal(changed.sessionVersion, 1);
     assert.equal((await request(base, hostA, '/api/client/profile', undefined, oldSession)).status, 403);
 
+    failMailDelivery = true;
+    const failedSend = await request(base, hostA, '/api/auth/forgot-password', { email: socialClient.email });
+    failMailDelivery = false;
+    assert.equal(failedSend.status, 503);
+    assert.equal(await prisma.passwordResetToken.count({ where: { userId: socialClient.id } }), 0);
+    rejectMailDelivery = true;
+    const rejectedSend = await request(base, hostA, '/api/auth/forgot-password', { email: socialClient.email });
+    rejectMailDelivery = false;
+    assert.equal(rejectedSend.status, 503);
+    assert.equal(await prisma.passwordResetToken.count({ where: { userId: socialClient.id } }), 0);
+
     assert.equal((await request(base, hostA, '/api/auth/forgot-password', { email: socialClient.email })).status, 200);
-    assert.equal(sent.length, 2);
-    const socialUrl = new URL(sent[1].text.match(/https:\/\/\S+/)[0]);
+    assert.equal(sent.length, 4);
+    const socialUrl = new URL(sent[3].text.match(/https:\/\/\S+/)[0]);
     const socialToken = new URLSearchParams(socialUrl.hash.slice(1)).get('token');
     assert.equal((await request(base, hostA, '/api/auth/reset-password', { token: socialToken, password: 'social-password-123' })).status, 200);
     const recoveredSocial = await prisma.user.findUniqueOrThrow({ where: { id: socialClient.id } });

@@ -17,7 +17,10 @@ export interface AuthState {
 type ApiMessage = {
   error?: unknown;
   message?: unknown;
+  code?: unknown;
 };
+
+export class RecoveryEmailNotRegisteredError extends Error {}
 
 /**
  * The API is expected to return JSON. A missing route or reverse proxy can
@@ -109,6 +112,9 @@ export async function requestPasswordReset(email: string): Promise<string> {
     body: JSON.stringify({ email }),
   });
   const data = await readApiMessage(response);
+  if (response.status === 404 && data.code === 'EMAIL_NOT_REGISTERED') {
+    throw new RecoveryEmailNotRegisteredError('Este correo no está registrado. Puedes crear una cuenta.');
+  }
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'No se pudo solicitar el enlace.');
   return typeof data.message === 'string' ? data.message : 'Revisa tu correo para continuar.';
 }
