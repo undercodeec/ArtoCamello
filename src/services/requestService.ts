@@ -35,7 +35,6 @@ export interface CreateRequestPayload {
   contactEmail: string;
   contactName?: string;
   estimatedBudget: number; // Presupuesto estimado del trabajo en USD (requerido)
-  captchaToken?: string;
 }
 
 

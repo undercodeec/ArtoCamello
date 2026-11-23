@@ -3,7 +3,6 @@ import { Outlet, NavLink, useNavigate } from 'react-router';
 import { LayoutDashboard, Users, User, Receipt, LogOut, Menu, X, Bell } from 'lucide-react';
 import { logout, getCurrentAuth } from '@/services/authService';
 import { listMatchingRequestsForProfessional } from '@/services/requestService';
-import { listUnlockedContacts } from '@/services/leadService';
 
 export function ProDashboardLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -22,17 +21,17 @@ export function ProDashboardLayout() {
       }
     } catch { /* ignore */ }
 
-    // Contar solicitudes nuevas (no desbloqueadas aún)
-    if (auth.userId) {
-      Promise.all([
-        listMatchingRequestsForProfessional(auth.userId),
-        listUnlockedContacts(auth.userId),
-      ]).then(([available, unlocked]) => {
-        const unlockedIds = new Set(unlocked.map((u) => u.purchase.requestId));
-        const newCount = available.filter((j) => !unlockedIds.has(j.id)).length;
-        setPendingCount(newCount);
-      }).catch(() => setPendingCount(0));
-    }
+    let active = true;
+    const refresh = () => {
+      if (!auth.userId || document.visibilityState !== 'visible') return;
+      listMatchingRequestsForProfessional(auth.userId)
+        .then(available => { if (active) setPendingCount(available.length); })
+        .catch(() => { /* Keep the last count when the connection fails. */ });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener('focus', refresh); };
   }, [auth.userId]);
 
   const handleLogout = () => {

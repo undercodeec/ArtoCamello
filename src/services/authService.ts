@@ -186,9 +186,9 @@ export async function verifyEmail(token: string): Promise<User> {
   return user;
 }
 
-export async function resendVerification(email: string, captchaToken: string): Promise<string> {
+export async function resendVerification(email: string): Promise<string> {
   const response = await fetch(`${API_URL}/auth/resend-verification`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, captchaToken }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }),
   });
   const data = await readApiMessage(response);
   if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'No se pudo solicitar otro enlace.');

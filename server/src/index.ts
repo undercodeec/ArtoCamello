@@ -203,7 +203,6 @@ app.post('/api/auth/resend-verification', async (req: Request, res: Response): P
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['resend-email', tenantId, ip, email.trim().toLowerCase()], 3, 3600000);
     if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Espera antes de solicitar otro enlace' }); return; }
-    if (!await captchaPassed(req, res)) return;
     const user = await prisma.user.findFirst({ where: { email: { equals: email.trim(), mode: 'insensitive' }, tenantId, emailVerified: false, active: true } });
     if (user && process.env.SMTP_USER && process.env.SMTP_PASS) {
       const verification = createEmailVerificationToken();
@@ -619,7 +618,6 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
     const userLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-user', req.user!.tenantId, req.user!.userId], 20, 3600000);
     const ipLimit = await consumeAuthAttempt(prisma, JWT_SECRET, ['publish-ip', req.user!.tenantId, ip], 60, 3600000);
     if (!userLimit.allowed || !ipLimit.allowed) { res.setHeader('Retry-After', String(Math.max(userLimit.retryAfterSeconds, ipLimit.retryAfterSeconds))).status(429).json({ error: 'Demasiadas solicitudes. Intenta más tarde.' }); return; }
-    if (!await captchaPassed(req, res)) return;
     if (body.visibility === 'direct') {
       const target = await prisma.user.findFirst({ where: { id: body.targetProfessionalUserId, tenantId: req.user!.tenantId, role: 'pro', active: true, emailVerified: true }, include: { professionalProfile: true } });
       if (!target?.professionalProfile?.verified || !hasServiceCategory(target.professionalProfile.categories, body.categorySlug)) {

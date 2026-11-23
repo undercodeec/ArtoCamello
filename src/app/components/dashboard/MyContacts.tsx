@@ -386,15 +386,17 @@ export function MyContacts() {
   const [myQuotes, setMyQuotes] = useState<Quote[]>([]);
   const [unlockedLoading, setUnlockedLoading] = useState(true);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (background = false) => {
     if (!auth.userId) {
       setInboxLoading(false);
       setUnlockedLoading(false);
       return;
     }
 
-    setInboxLoading(true);
-    setUnlockedLoading(true);
+    if (!background) {
+      setInboxLoading(true);
+      setUnlockedLoading(true);
+    }
     setInboxError('');
 
     const [availableResult, unlockedResult, sentQuotesResult, transfersResult] = await Promise.allSettled([
@@ -431,6 +433,10 @@ export function MyContacts() {
   useEffect(() => {
     loadData();
     getPaymentMethods().then(methods => { setTransferAvailable(methods.transfer); setPayphoneAvailable(methods.payphone); setCardAvailable(methods.card); }).catch(() => { setTransferAvailable(false); setPayphoneAvailable(false); setCardAvailable(false); });
+    const refresh = () => { if (document.visibilityState === 'visible') void loadData(true); };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); };
   }, [loadData]);
 
   const handleQuoteSubmit = async (payload: any) => {
@@ -589,7 +595,7 @@ export function MyContacts() {
       {activeTab === 'inbox' && (
         <>
           {inboxError && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {inboxError} <button type="button" onClick={loadData} className="ml-2 font-semibold underline">Reintentar</button>
+            {inboxError} <button type="button" onClick={() => loadData()} className="ml-2 font-semibold underline">Reintentar</button>
           </div>}
           {inboxLoading ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

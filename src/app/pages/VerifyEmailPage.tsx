@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { resendVerification, verifyEmail } from '@/services/authService';
 import { UserRole } from '@/domain/types';
-import { RecaptchaWidget, recaptchaConfigured } from '@/shared/components/RecaptchaWidget';
 
 export function VerifyEmailPage() {
   const navigate = useNavigate();
@@ -10,8 +9,6 @@ export function VerifyEmailPage() {
   const [error, setError] = useState('');
   const [working, setWorking] = useState(Boolean(token));
   const [email, setEmail] = useState('');
-  const [captchaToken, setCaptchaToken] = useState('');
-  const [captchaReset, setCaptchaReset] = useState(0);
   const [resending, setResending] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
   useEffect(() => {
@@ -35,15 +32,13 @@ export function VerifyEmailPage() {
     {working ? <p role="status" className="mt-4">Verificando tu cuenta...</p> : <p role="alert" className="mt-4 text-red-700">{error || 'El enlace de verificación no es válido.'}</p>}
     {!working && <form className="mt-6 space-y-3" onSubmit={async event => {
       event.preventDefault();
-      if (recaptchaConfigured && !captchaToken) { setError('Completa la verificación de seguridad.'); return; }
       setResending(true); setError(''); setResendMessage('');
-      try { setResendMessage(await resendVerification(email.trim(), captchaToken)); }
+      try { setResendMessage(await resendVerification(email.trim())); }
       catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo solicitar otro enlace.'); }
-      finally { setResending(false); setCaptchaReset(current => current + 1); }
+      finally { setResending(false); }
     }}>
       <label htmlFor="verify-email" className="block text-sm font-semibold">Solicitar otro enlace</label>
       <input id="verify-email" type="email" value={email} onChange={event => setEmail(event.target.value)} required placeholder="Tu correo" className="w-full rounded-lg border px-3 py-2" />
-      <RecaptchaWidget onToken={setCaptchaToken} resetKey={captchaReset} />
       <button type="submit" disabled={resending} className="rounded-lg bg-[#101828] px-4 py-2 font-semibold text-white disabled:opacity-60">{resending ? 'Enviando...' : 'Reenviar verificación'}</button>
       {resendMessage && <p role="status" className="text-sm text-green-700">{resendMessage}</p>}
     </form>}

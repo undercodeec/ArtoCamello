@@ -60,11 +60,11 @@ test('registration requires email confirmation before issuing a session', async 
     assert.ok(verificationUrl);
     const verificationToken = new URL(verificationUrl).hash.slice('#token='.length);
     failMailDelivery = true;
-    const resend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
+    const resend = await call('/api/auth/resend-verification', 'POST', { email });
     assert.equal(resend.status, 200, JSON.stringify(resend.body));
     assert.equal(await prisma.emailVerificationToken.count({ where: { userId: user.id } }), 1);
     failMailDelivery = false;
-    const successfulResend = await call('/api/auth/resend-verification', 'POST', { email, captchaToken: 'valid' });
+    const successfulResend = await call('/api/auth/resend-verification', 'POST', { email });
     assert.equal(successfulResend.status, 200, JSON.stringify(successfulResend.body));
     assert.equal(sentMail.length, 2);
     const resendVerificationUrl = sentMail[1].text.match(/https?:\/\/\S+\/verificar-correo#token=[A-Za-z0-9_-]+/)?.[0];

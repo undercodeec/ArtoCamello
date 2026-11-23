@@ -68,10 +68,7 @@ test('a client request appears in client history and matching professional inbox
       contactEmail: `${clientId}@example.test`, estimatedBudget: 50,
     };
 
-    const withoutCaptcha = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined });
-    assert.equal(withoutCaptcha.status, 400, withoutCaptcha.body);
-
-    const created = await request('/api/requests', 'POST', clientToken, payload);
+    const created = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined });
     assert.equal(created.status, 201, created.body);
     const saved = JSON.parse(created.body);
     assert.equal(saved.categorySlug, payload.categorySlug);
@@ -89,6 +86,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(available.status, 200, available.body);
     const visibleRequest = JSON.parse(available.body).find(item => item.id === saved.id);
     assert.ok(visibleRequest);
+    assert.equal(visibleRequest.estimatedBudget, 50);
     assert.equal(visibleRequest.contactName, undefined);
     assert.equal(visibleRequest.contactPhone, undefined);
     assert.equal(visibleRequest.contactEmail, undefined);
@@ -143,12 +141,15 @@ test('a client request appears in client history and matching professional inbox
     const invalid = await request('/api/requests', 'POST', clientToken, { ...payload, estimatedBudget: 0 });
     assert.equal(invalid.status, 400);
 
-    const direct = await request('/api/requests', 'POST', clientToken, { ...payload, title: 'Mi dirección Calle 99', description: 'Llámame al 0999999999', visibility: 'direct', targetProfessionalUserId: professionalId });
+    captchaAccepted = false;
+    const direct = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, title: 'Mi dirección Calle 99', description: 'Llámame al 0999999999', visibility: 'direct', targetProfessionalUserId: professionalId });
     assert.equal(direct.status, 201, direct.body);
+    captchaAccepted = true;
     const directId = JSON.parse(direct.body).id;
     const ownAvailable = JSON.parse((await request('/api/requests/available', 'GET', professionalToken)).body);
     const otherAvailable = JSON.parse((await request('/api/requests/available', 'GET', otherProfessionalToken)).body);
     assert.ok(ownAvailable.some(item => item.id === directId));
+    assert.equal(ownAvailable.find(item => item.id === directId).estimatedBudget, 50);
     assert.ok(!otherAvailable.some(item => item.id === directId));
     assert.ok(!JSON.stringify(ownAvailable).includes('Calle 99'));
     assert.ok(!JSON.stringify(ownAvailable).includes('0999999999'));
@@ -157,6 +158,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal((await request('/api/payments/card-intents', 'POST', otherProfessionalToken, { requestId: directId }, { 'Idempotency-Key': crypto.randomUUID() })).status, 403);
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, categorySlug: 'categoria-falsa' })).status, 400);
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, targetProfessionalUserId: professionalId })).status, 400);
+    assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, visibility: 'direct', targetProfessionalUserId: 'missing-professional' })).status, 404);
     const directIntent = await request('/api/payments/transfer-intents', 'POST', professionalToken, { requestId: directId });
     assert.equal(directIntent.status, 201, directIntent.body);
     const directPayment = JSON.parse(directIntent.body).payment;

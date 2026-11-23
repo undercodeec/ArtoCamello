@@ -4,7 +4,6 @@ import { getCurrentUser } from '@/services/authService';
 import { createServiceRequest } from '@/services/requestService';
 import { UrgencyLevel } from '@/domain/types';
 import { RequestFormValues, toRequestPayload, validateRequestForm } from '@/app/constants/requestForm';
-import { RecaptchaWidget, recaptchaConfigured } from '@/shared/components/RecaptchaWidget';
 import { useAuth } from '@/shared/context/AuthContext';
 
 const DRAFT_KEY = 'marketplaceRequestDraft';
@@ -27,8 +26,6 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState('');
-  const [captchaReset, setCaptchaReset] = useState(0);
   const inFlight = useRef(false);
   const categories = getAllCategories();
 
@@ -45,7 +42,6 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
     const problem = validateRequestForm(values);
     if (problem) { setError(problem); return; }
     if (!auth.isAuthenticated || auth.role !== 'client') { setError('Inicia sesión como cliente para publicar una solicitud.'); return; }
-    if (recaptchaConfigured && !captchaToken) { setError('Completa la verificación de seguridad.'); return; }
     inFlight.current = true;
     setSubmitting(true);
     setError('');
@@ -56,17 +52,15 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
       sessionStorage.setItem(KEY_KEY, idempotencyKey);
     }
     try {
-      await createServiceRequest({ ...toRequestPayload(values), ...(captchaToken ? { captchaToken } : {}) }, idempotencyKey);
+      await createServiceRequest(toRequestPayload(values), idempotencyKey);
       sessionStorage.removeItem(DRAFT_KEY);
       sessionStorage.removeItem(KEY_KEY);
       const user = getCurrentUser();
       setValues({ ...initial, contactName: user?.fullName || '', contactEmail: user?.email || '', contactPhone: user?.phone || '' });
-      setCaptchaReset(current => current + 1);
       await onPublished();
       setSuccess('Solicitud publicada. Ya aparece en tu historial de abajo.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'No se pudo publicar la solicitud.');
-      setCaptchaReset(current => current + 1);
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -100,7 +94,6 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
         <h2 className="border-t pt-5 text-xl font-bold">Tus datos de contacto</h2>
         <div className="grid gap-5 sm:grid-cols-2">{field('contactName', 'Nombre')}{field('contactEmail', 'Correo', 'email')}</div>
         {field('contactPhone', 'Teléfono', 'tel')}
-        <RecaptchaWidget onToken={setCaptchaToken} resetKey={captchaReset} />
         {success && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-800">{success}</p>}
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         <button type="submit" disabled={submitting} className="w-full rounded-lg bg-[#101828] px-6 py-4 font-bold text-white disabled:opacity-60">{submitting ? 'Publicando...' : 'Publicar solicitud'}</button>
