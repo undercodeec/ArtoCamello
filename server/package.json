@@ -16,7 +16,7 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:reconcile": "ts-node prisma/reconcile.ts",
     "test:integration": "pnpm run build && node --test tests/admin.integration.js tests/password-reset.integration.js tests/client-request.integration.js tests/public-request-discovery.integration.js tests/client-account-deletion.integration.js tests/email-verification.integration.js tests/notification-email.integration.js",
-    "test:security-unit": "pnpm run build && node --test tests/admin-code-guard.unit.js tests/security-helpers.unit.js"
+    "test:security-unit": "pnpm run build && node --test tests/admin-code-guard.unit.js tests/security-helpers.unit.js tests/transfer-notifications.unit.js tests/transfer-receipt.unit.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",

@@ -1,6 +1,12 @@
 # ArtoCamello: estado actual y alcance comercial del primer MVP
 
-Actualizado: 16 de noviembre de 2026. Este documento describe el código presente en este repositorio y separa lo implementado de las decisiones comerciales previstas. Para operar el panel, consulta también [ADMIN_OPERACION.md](../ADMIN_OPERACION.md); para requisitos de salida a producción, [PRODUCTION_CHECKLIST.md](../server/docs/PRODUCTION_CHECKLIST.md).
+Actualizado: 24 de noviembre de 2026. Este documento describe el código presente en este repositorio y separa lo implementado de las decisiones comerciales previstas. Para operar el panel, consulta también [ADMIN_OPERACION.md](../ADMIN_OPERACION.md); para requisitos de salida a producción, [PRODUCTION_CHECKLIST.md](../server/docs/PRODUCTION_CHECKLIST.md).
+
+## Actualización del 24 de noviembre de 2026
+
+Las tarjetas de servicios populares enlazan a su categoría de búsqueda. El perfil público oculta la galería cuando no hay imágenes de portafolio y ya no utiliza imágenes de ejemplo en las recomendaciones; se retiró el mensaje de suscripciones. El registro espera a que reCAPTCHA esté listo y limpia el token al cambiar de vista.
+
+Al enviar un comprobante de transferencia se intenta notificar por correo a los revisores autorizados del tenant. Al aprobar y asignar el pago se intenta enviar al profesional un recibo con el logo y los datos del pago; no es una factura tributaria. Estos correos dependen de SMTP, no tienen reintento automático y sus fallos no revierten el comprobante ni la aprobación. Consulta los detalles operativos en [ADMIN_OPERACION.md](../ADMIN_OPERACION.md).
 
 ## Actualización del 10 de noviembre de 2026
 

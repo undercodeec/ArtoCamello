@@ -11,6 +11,7 @@ import { TransferProvider } from './paymentProvider';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 import { hasServiceCategory } from './serviceCategories';
 import { canProfessionalAccessRequest, isPurchasableRequest, purchaseLimitForRequest } from './requestPolicy';
+import { notifyTransferReview } from './transferNotifications';
 
 type PayerRequest = Request & { payer?: { userId: string; tenantId: string } };
 const run = promisify(execFile);
@@ -167,6 +168,8 @@ export function transferRouter(db: PrismaClient, secret: string) {
       return submission;
     }); } catch (error) { await unlink(filePath).catch(() => {}); throw error; }
     if (!result) { await unlink(filePath).catch(() => {}); res.status(409).json({ error: 'Estado cambió durante el envío' }); return; }
+    try { await notifyTransferReview(db, tenantId, payment.reference); }
+    catch (error) { console.error('No se pudo preparar el aviso de transferencia.', error); }
     res.status(201).json({ submissionId: result.id, status: 'under_review' });
   }));
   router.get('/mine', wrap(async (req, res) => {

@@ -41,6 +41,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
+    setCaptchaToken('');
     setError('');
     setEmailNotRegistered(false);
     setSuccess('');
@@ -49,6 +50,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
 
   const changeView = (next: View) => {
     setView(next);
+    setCaptchaToken('');
     setError('');
     setEmailNotRegistered(false);
     setSuccess('');

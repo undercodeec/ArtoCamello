@@ -206,8 +206,8 @@ function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }
     if (!window.confirm(confirmation)) return;
     setBusy(true); setMessage('');
     try {
-      await adminRequest(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) });
-      setMessage(decision === 'approve' ? 'Pago aprobado y contacto desbloqueado.' : 'Comprobante rechazado.');
+      const result = await adminRequest<{ receiptEmailFailed?: boolean }>(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) });
+      setMessage(decision === 'approve' ? (result.receiptEmailFailed ? 'Pago aprobado y contacto desbloqueado, pero no se pudo enviar el recibo por correo. Contacta a soporte.' : 'Pago aprobado y contacto desbloqueado.') : 'Comprobante rechazado.');
       reload();
     } catch (decisionError) { setMessage((decisionError as Error).message); } finally { setBusy(false); }
   };

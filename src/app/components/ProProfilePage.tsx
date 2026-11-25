@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate, useParams } from 'react-router';
-import { Star, Trophy, ChevronLeft, ChevronRight, Play, Check, ArrowRight, ChevronDown, Clock, RefreshCw, Languages, HelpCircle, X, MapPin, Calendar, Map, Heart, Video } from 'lucide-react';
+import { Star, Trophy, ChevronLeft, ChevronRight, Check, ArrowRight, ChevronDown, Clock, RefreshCw, Languages, HelpCircle, X, MapPin, Calendar, Map, Heart, Video } from 'lucide-react';
 import mapImage from 'figma:asset/217acabfcd1de0fb0c010dbd96a25fa14b2c6b3f.png';
 import { SignUpModal } from './SignUpModal';
 import { getProfessionalById, PublicProfessional, postReview, getPublicProfessionals } from '@/services/professionalService';
@@ -13,14 +13,6 @@ import { createServiceRequest } from '@/services/requestService';
 import { UrgencyLevel, UserRole } from '@/domain/types';
 import { LocationMapPicker, type MapLocation } from './LocationMapPicker';
 import { serviceLabel } from '@/app/constants/serviceSearch';
-
-const FALLBACK_IMAGES = [
-  "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwd29ya2luZ3xlbnwxfHx8fDE3NzQwMTI5NzV8MA&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1771232217622-5f267b1f46df?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiYXRocm9vbSUyMHJlcGFpcnxlbnwxfHx8fDE3NzQxMTM3ODl8MA&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1765518440022-10242cc86895?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3cmVuY2glMjB0b29sfGVufDF8fHx8MTc3NDA4NTgzOHww&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1734689604220-712f496a9e21?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmaXhpbmclMjBzaW5rfGVufDF8fHx8MTc3NDExMzc5NXww&ixlib=rb-4.1.0&q=80&w=1080",
-  "https://images.unsplash.com/photo-1771122453274-d3270e73cf94?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwbHVtYmVyJTIwdG9vbHN8ZW58MXx8fHwxNzc0MTA1Nzc5fDA&ixlib=rb-4.1.0&q=80&w=1080"
-];
 
 const CITY_OPTIONS = [
   'Alóag', 'Amaguaña', 'Calderón', 'Cayambe', 'Conocoto', 'Cumbayá',
@@ -41,6 +33,7 @@ export function ProProfilePage() {
   useEffect(() => {
     if (id) {
       setLoadingPro(true);
+      setCurrentImageIndex(0);
       Promise.all([
         getProfessionalById(id),
         getPublicProfessionals().catch(() => [])
@@ -249,7 +242,7 @@ export function ProProfilePage() {
     });
   }, [pro]);
 
-  const images = pro?.profile?.portfolioImages && pro.profile.portfolioImages.length > 0 ? pro.profile.portfolioImages : FALLBACK_IMAGES;
+  const images = pro?.profile?.portfolioImages || [];
 
   const nextImage = () => {
     setCurrentImageIndex((prev) => (prev + 1) % images.length);
@@ -386,6 +379,7 @@ export function ProProfilePage() {
           </div>
 
           {/* Media Gallery */}
+          {images.length > 0 && (
           <div className="mb-10 relative">
             {/* Main Image Container */}
             <div className="relative aspect-video w-full bg-gray-100 rounded-sm overflow-hidden group">
@@ -395,15 +389,6 @@ export function ProProfilePage() {
                 className="w-full h-full object-cover"
               />
               
-              {/* Play Button Overlay (mock video) */}
-              {currentImageIndex === 0 && images.length === FALLBACK_IMAGES.length && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 bg-black/50 rounded-full flex items-center justify-center cursor-pointer hover:bg-black/60 transition-colors">
-                    <Play className="w-8 h-8 text-white ml-1 fill-white" />
-                  </div>
-                </div>
-              )}
-
               {/* Navigation Arrows */}
               {images.length > 1 && (
                 <>
@@ -433,16 +418,12 @@ export function ProProfilePage() {
                     className={`relative w-24 h-16 flex-shrink-0 rounded-sm overflow-hidden ${currentImageIndex === idx ? 'ring-2 ring-black' : 'opacity-60 hover:opacity-100 transition-opacity'}`}
                   >
                     <img src={img} alt={`Miniatura ${idx + 1}`} className="w-full h-full object-cover" />
-                    {idx === 0 && images.length === FALLBACK_IMAGES.length && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                        <Play className="w-5 h-5 text-white fill-white" />
-                      </div>
-                    )}
                   </button>
                 ))}
               </div>
             )}
           </div>
+          )}
 
           {/* About This Service */}
           <div className="mb-12">
@@ -659,14 +640,16 @@ export function ProProfilePage() {
               {recommendedPros.map(recPro => (
                 <div key={recPro.id} onClick={() => navigate(`/profile/${recPro.id}`)} className="w-full cursor-pointer group">
                   {/* Thumbnail */}
+                  {recPro.profile?.portfolioImages?.[0] && (
                   <div className="relative h-[168px] rounded-lg overflow-hidden mb-4 bg-gray-100">
                     <img 
-                      src={recPro.profile?.portfolioImages?.[0] || FALLBACK_IMAGES[Math.floor(Math.random() * FALLBACK_IMAGES.length)]} 
+                      src={recPro.profile.portfolioImages[0]}
                       alt={`Thumbnail ${recPro.fullName}`} 
                       className="w-full h-full object-cover group-hover:opacity-95 transition" 
                     />
                     <Heart className="absolute top-3 right-3 w-5 h-5 text-white drop-shadow-md cursor-pointer hover:fill-black/30 transition-all" />
                   </div>
+                  )}
                   
                   {/* User Info */}
                   <div className="flex items-center justify-between mb-2">
@@ -738,10 +721,6 @@ export function ProProfilePage() {
                 
               </div>
               
-              <p className="text-[#62646A] text-sm mb-4">
-                Ahorra hasta un 10 % con <span className="font-semibold text-[#1dbf73] cursor-pointer hover:underline">las suscripciones.</span> <HelpCircle className="w-3.5 h-3.5 inline text-gray-400" />
-              </p>
-
               <p className="text-[#404145] text-sm font-semibold mb-6">
                 <span className="font-bold">El paquete mínimo</span> Reparaciones avanzadas, sellado, cambios de tuberías, revisión de presión y limpieza del área (hasta 4 horas)
               </p>

@@ -36,6 +36,10 @@ La migración conserva `LeadPurchase` y sus campos PayPhone heredados. `pnpm pri
 4. Confirma la recepción en el banco **antes** de pulsar Aprobar. La aprobación asigna el pago y desbloquea el contacto en una transacción. Una segunda aprobación no incrementa el cupo.
 5. Si no coincide, rechaza con motivo específico. El profesional ve el motivo y puede enviar un nuevo comprobante; el anterior permanece en el historial.
 
+Al recibir un comprobante, el sistema intenta avisar por correo a cada membresía activa del tenant con permiso `payments.review` y usuario activo. El aviso contiene la referencia, sin adjuntar el archivo. La bandeja del panel sigue siendo la fuente de seguimiento: los fallos de correo se registran en el servidor y no impiden guardar el comprobante; no hay reintento automático.
+
+Tras aprobar y asignar una transferencia, se intenta enviar al profesional un recibo por correo con el logo, sus datos disponibles, concepto, referencia, fecha y monto. Es una confirmación de pago, **no una factura tributaria**. Se registra un único intento mediante el evento `receipt_email_attempted`; este evento no confirma la entrega y no hay reenvío automático. Si el envío falla, el pago permanece aprobado, el panel advierte al revisor y se registra el error para soporte. Asegura que `server/assets/logoartocamello-white.png` se incluya en el despliegue junto con el servidor y verifica SMTP antes de la puesta en marcha.
+
 Objetivo operativo inicial: revisar cada envío dentro de un día hábil. Escala pagos vencidos, duplicados o disputados al dueño del tenant. Si el banco está indisponible, deja el pago en revisión; no apruebes por la imagen sola.
 
 El dashboard muestra pagos vencidos, pagos de proveedor aprobados pendientes de resolución, proporción de decisiones de transferencia rechazadas y tiempo medio de revisión de los últimos 1.000 comprobantes revisados. Supervisa estos valores junto con la bandeja y la auditoría.

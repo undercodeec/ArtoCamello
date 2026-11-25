@@ -9,6 +9,7 @@ import path from 'path';
 import { createSmtpTransport, smtpFrom } from './mail';
 import { verifyAdminEmailSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
+import { sendTransferReceipt } from './transferReceipt';
 
 type Context = { tenantId: string; actorId: string; permissions: Set<string>; role: string };
 type AdminRequest = Request & { admin?: Context };
@@ -200,7 +201,10 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (note.length < 5) { res.status(400).json({ error: 'Indica una nota de revisión de al menos 5 caracteres' }); return; }
     try {
       const updated = await allocateLead(db, p.id, c.tenantId, 'admin', c.actorId, note);
-      res.json({ payment: updated });
+      let receiptEmailFailed = false;
+      try { await sendTransferReceipt(db, c.tenantId, p.id); }
+      catch (error) { receiptEmailFailed = true; console.error('No se pudo enviar el recibo de transferencia.', { paymentId: p.id, error }); }
+      res.json({ payment: updated, receiptEmailFailed });
     } catch (error) { if (error instanceof PaymentConflict || (error as { code?: string }).code === 'P2034') { const latest = await db.payment.findFirst({ where: { id: p.id, tenantId: c.tenantId } }); if (latest?.status === 'allocated') { res.json({ payment: latest, alreadyApproved: true }); return; } res.status(409).json({ error: error instanceof Error ? error.message : 'Conflicto concurrente' }); return; } throw error; }
   }));
   router.post('/payments/transfers/:id/reject', allow('payments.review'), wrap(async (req, res) => {

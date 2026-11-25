@@ -1,21 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 
-type Grecaptcha = { render: (element: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback': () => void; 'error-callback': () => void }) => number; reset: (id: number) => void };
+type Grecaptcha = { ready: (callback: () => void) => void; render: (element: HTMLElement, options: { sitekey: string; callback: (token: string) => void; 'expired-callback': () => void; 'error-callback': () => void }) => number; reset: (id: number) => void };
 declare global { interface Window { grecaptcha?: Grecaptcha } }
 
 const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
 let scriptPromise: Promise<void> | null = null;
 
 function loadScript(): Promise<void> {
-  if (window.grecaptcha) return Promise.resolve();
+  if (scriptPromise) return scriptPromise;
+  if (window.grecaptcha?.ready) return new Promise(resolve => window.grecaptcha!.ready(resolve));
   if (!scriptPromise) scriptPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('No se pudo cargar la verificación de seguridad.'));
+    script.onload = () => {
+      if (window.grecaptcha?.ready) window.grecaptcha.ready(resolve);
+      else reject(new Error('No se pudo cargar la verificación de seguridad.'));
+    };
+    script.onerror = () => { script.remove(); reject(new Error('No se pudo cargar la verificación de seguridad.')); };
     document.head.appendChild(script);
-  });
+  }).catch(error => { scriptPromise = null; throw error; });
   return scriptPromise;
 }
 
@@ -33,7 +37,7 @@ export function RecaptchaWidget({ onToken, resetKey = 0 }: { onToken: (token: st
           'expired-callback': () => onToken(''), 'error-callback': () => onToken(''),
         });
       }
-    }).catch(() => { onToken(''); setError('No se pudo cargar la verificación. Recarga la página para intentarlo de nuevo.'); });
+    }).catch(() => { if (active) { onToken(''); setError('No se pudo cargar la verificación. Recarga la página para intentarlo de nuevo.'); } });
     return () => { active = false; };
   }, []);
   useEffect(() => { if (resetKey && widget.current !== null) { window.grecaptcha?.reset(widget.current); onToken(''); } }, [resetKey]);

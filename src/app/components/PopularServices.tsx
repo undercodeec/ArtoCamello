@@ -2,6 +2,7 @@ import image_f9af766baac4c7a398bd50709fc731854a1d22fd from 'figma:asset/f9af766b
 import image_20cfaa17ccb824b0f00b8e7abaa02c099d83ff63 from 'figma:asset/20cfaa17ccb824b0f00b8e7abaa02c099d83ff63.png'
 import image_step3 from 'figma:asset/62a7846a80b09f8084074694693eb26e2a63983f.png'
 import React, { useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import svgPaths from "../../imports/svg-8jlxif1gds";
@@ -25,6 +26,7 @@ export function PopularServices() {
    const services = [
       {
          title: 'FONTANERÍA',
+         category: 'fontaneria',
          img: 'https://images.unsplash.com/photo-1585704032915-c3400ca199e7?auto=format&fit=crop&w=800&q=80',
          icon: (
             <svg className="w-[60px] h-[40px] mb-8" fill="none" viewBox="0 0 64 42">
@@ -35,6 +37,7 @@ export function PopularServices() {
       },
       {
          title: 'LIMPIEZA',
+         category: 'limpieza',
          img: 'https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?auto=format&fit=crop&w=800&q=80',
          icon: (
             <svg className="w-[36px] h-[36px] mb-8" fill="none" viewBox="0 0 40 40">
@@ -46,6 +49,7 @@ export function PopularServices() {
       },
       {
          title: 'PINTURA',
+         category: 'pintura',
          img: 'https://images.unsplash.com/photo-1562259949-e8e7689d7828?auto=format&fit=crop&w=800&q=80',
          icon: (
             <svg className="w-[37px] h-[37px] mb-8" fill="none" viewBox="0 0 38 38">
@@ -55,6 +59,7 @@ export function PopularServices() {
       },
       {
          title: 'ELECTRICIDAD',
+         category: 'electricidad',
          img: 'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&w=800&q=80',
          icon: (
             <svg className="w-[54px] h-[36px] mb-8" fill="none" viewBox="0 0 58 40">
@@ -116,8 +121,9 @@ export function PopularServices() {
                   style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}
                >
                   {services.map((service, idx) => (
-                     <div
+                     <Link
                         key={idx}
+                        to={`/search?c=${service.category}`}
                         className="min-w-[340px] h-[335px] snap-start relative flex-shrink-0 group/card cursor-pointer"
                      >
                         {/* Mask and Background Wrapper */}
@@ -146,7 +152,7 @@ export function PopularServices() {
                               {service.title}
                            </h3>
                         </div>
-                     </div>
+                     </Link>
                   ))}
                </div>
 
