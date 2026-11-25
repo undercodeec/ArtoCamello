@@ -57,6 +57,8 @@ La imagen de un comprobante **no prueba por sí sola** que el dinero llegó al b
 
 La vista `/demo` en desarrollo usa datos ficticios. Sus apartados de Clientes, Profesionales y Administradores muestran fichas de esos actores; únicamente Transferencias y Todos los pagos muestran detalles de cobros. Esa vista no demuestra un pago real ni carga archivos del servidor.
 
+Los borradores de [Política de privacidad](POLITICA_DE_PRIVACIDAD.md) y [Términos de servicio](TERMINOS_DE_SERVICIO.md) se sirven en `/politica-de-privacidad` y `/terminos-de-servicio`. Google Analytics y Meta Pixel están deshabilitados en el código; reCAPTCHA y mapas de terceros siguen disponibles. Antes de la publicación definitiva deben resolverse los puntos de [revisión legal](REVISION_LEGAL_PUBLICACION.md), especialmente la identidad del responsable, las transferencias internacionales y los plazos de conservación.
+
 Los estados de `Payment` son `created`, `awaiting_transfer`, `under_review`, `approved`, `rejected`, `pending_provider`, `failed`, `expired` y `allocated`. `approved` puede indicar cobro de proveedor confirmado aún sin contacto asignado; `allocated` indica que el contacto se desbloqueó. Los detalles de pago del panel administrativo son registros de pagos hechos por profesionales, aunque los consulte un administrador.
 
 ## 5. Límites y decisiones pendientes antes de comercializar

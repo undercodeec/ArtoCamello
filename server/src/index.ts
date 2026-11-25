@@ -29,6 +29,7 @@ if (trustedProxyCidrs.length) app.set('trust proxy', trustedProxyCidrs);
 const port = process.env.PORT || 3000;
 if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)) throw new Error('JWT_SECRET de al menos 32 caracteres requerido');
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-change-me';
+const REGISTRATION_TERMS_VERSION = '2026-11-25-borrador-2';
 
 // ---- PayPhone config ----
 const PAYPHONE_TOKEN = process.env.PAYPHONE_TOKEN || '';
@@ -107,8 +108,9 @@ function validClientPhone(value: unknown): value is string {
 // 1. Registro
 app.post('/api/auth/register', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password, fullName, phone } = req.body || {};
+    const { email, password, fullName, phone, adultDeclaration, termsAccepted, termsVersion } = req.body || {};
     if (typeof email !== 'string' || email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || typeof password !== 'string' || password.length < 8 || password.length > 128 || typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.length > 100 || (phone !== undefined && (typeof phone !== 'string' || phone.length > 30))) { res.status(400).json({ error: 'Datos de registro inválidos' }); return; }
+    if (adultDeclaration !== true || termsAccepted !== true || termsVersion !== REGISTRATION_TERMS_VERSION) { res.status(400).json({ error: 'Confirma que eres mayor de edad y acepta la versión vigente de los términos.' }); return; }
     const normalizedEmail = email.trim().toLowerCase();
     const tenantId = await tenantForHost(req.hostname);
     if (!tenantId) { res.status(404).json({ error: 'Tenant no configurado' }); return; }
@@ -138,6 +140,8 @@ app.post('/api/auth/register', async (req: Request, res: Response): Promise<void
           phone,
           emailVerified: false,
           tenantId,
+          termsAcceptedAt: new Date(),
+          termsVersion: REGISTRATION_TERMS_VERSION,
         },
       });
       await tx.emailVerificationToken.create({ data: { userId: newUser.id, tokenHash: verification.tokenHash, expiresAt: verification.expiresAt } });

@@ -1,0 +1,25 @@
+# Revisión previa a la publicación de privacidad y términos
+
+Documento interno. Consulta realizada el **25 de noviembre de 2026**. Los textos de `POLITICA_DE_PRIVACIDAD.md` y `TERMINOS_DE_SERVICIO.md` son **borradores**, no sustituyen asesoramiento jurídico ni la implementación de controles de privacidad. Las páginas públicas incluyen estos borradores para revisión; no declarar conformidad legal hasta resolver lo siguiente.
+
+## Fuentes oficiales consultadas
+
+- [SPDP: marco normativo](https://www.spdp.gob.ec/marco-normativo/): Constitución, Ley Orgánica de Protección de Datos Personales (LOPDP) y Reglamento General (Decreto 904, publicado el 13 de noviembre de 2023).
+- [Texto de la LOPDP publicado por la SPDP](https://www.spdp.gob.ec/wp-content/uploads/2026/10/02-Ley-Organica-de-Proteccion-de-Datos-Personales-2021_compressed.pdf): artículos 7 y 8 (bases y consentimiento), 12 (información previa, identidad, finalidades, plazos, terceros y derechos), 13 a 18 (derechos y excepciones), 47 (políticas y medidas del responsable).
+- [Reglamento General publicado por la SPDP](https://www.spdp.gob.ec/wp-content/uploads/2026/09/03-Reglamento-General-de-la-Ley-Organica-de-Proteccion-de-Datos-Personales-2023.pdf).
+- [SPDP: consentimiento](https://www.spdp.gob.ec/docs/proteccion-de-datos-personales/general/consentimiento/): debe ser libre, específico, informado e inequívoco; no es la única base de tratamiento.
+- [SPDP: derechos de los titulares](https://www.spdp.gob.ec/docs/proteccion-de-datos-personales/cuales-son-mis-derechos/) y [presentación de denuncias](https://servicios.spdp.gob.ec/denuncia).
+- [SPDP: normativa y sus cambios](https://www.spdp.gob.ec/docs/proteccion-de-datos-personales/general/normativa/): consultar también resoluciones y reglas secundarias vigentes antes de la publicación definitiva.
+
+## Puntos que debe resolver el operador
+
+1. Identificar al responsable legal real: razón social/RUC, domicilio, teléfono y correo funcional para atención y derechos. Determinar si corresponde delegado y publicar sus datos cuando aplique. Reemplazar **todos** los campos `[PENDIENTE: ...]` de ambos documentos y comprobar que atiendan solicitudes.
+2. El operador informa VPS RackNerd y base Neon en Virginia, EE. UU.; comprobar identidad comercial del proveedor, configuración y ubicaciones de respaldos. Completar inventario de correo, anti-spam, mapas y pasarela de pagos, contratos y garantías para comunicaciones o transferencias internacionales. Validar base jurídica para cada finalidad y texto previo a la recogida (art. 12 LOPDP).
+3. Google Analytics y Meta Pixel fueron deshabilitados en el código: no se cargan sus scripts y los eventos de Meta no se envían. No hay panel de preferencias. Antes de reactivarlos evaluar su base y configurar controles apropiados. Revisar Google reCAPTCHA y mapas de terceros, que siguen activos según la configuración.
+4. Aprobar calendario de conservación por categoría (cuentas, solicitudes, compras, comprobantes privados, auditoría, reseñas y respaldos), procedimientos de eliminación y excepciones. La baja de clientes anonimiza solicitudes en `server/src/index.ts`; los profesionales no tienen flujo de baja equivalente. Verificar impacto sobre pagos ya efectuados.
+5. Validar jurídicamente la regla aprobada de mayoría de edad, tratamiento de menores y representantes, política de reembolsos, disputas y datos fiscales/facturación; validar publicidad comercial, precio visible antes del pago y condiciones de los métodos habilitados. El alta nueva registra fecha y versión de aceptación con declaración de edad, no verifica la edad ni recopila fecha de nacimiento; las cuentas anteriores no tienen aceptación retroactiva. Actualizar versión y conservar textos históricos antes de cambiar los términos. No prometer facturas electrónicas que no se generan.
+6. Revisar identidad de responsables para otros tenants, si se usan; las páginas públicas actuales son genéricas, mientras el backend separa datos por tenant. Verificar registro de versiones y comunicación de modificaciones a los usuarios.
+
+La versión de términos aceptada en altas nuevas es `2026-11-25-borrador-2`, conservada en `docs/versions/terminos-2026-11-25-borrador-2.md`; se conserva también el borrador anterior. Al modificar el contenido contractual, conserva una nueva copia inmutable y actualiza de forma coordinada el identificador en el servidor y en el formulario; el servidor rechaza clientes desactualizados. La aceptación de términos no es consentimiento para tratamientos opcionales.
+
+Los documentos se basan en el flujo actual descrito en `ESTADO_ACTUAL_Y_MVP.md`, `server/src/index.ts`, `server/src/transfers.ts`, `server/src/admin.ts`, `server/src/transferReceipt.ts`, `src/app/components/OnboardingPage.tsx`, `src/app/components/ProProfilePage.tsx` e `index.html`. No se han comprobado configuraciones ni contratos productivos. Las opciones sugeridas para edad, reembolsos y conservación están en [propuestas para decisión](PROPUESTAS_LEGALES_OPERATIVAS.md) y requieren aprobación; no describen funcionalidades ya implementadas.

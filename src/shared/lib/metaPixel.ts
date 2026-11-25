@@ -10,11 +10,9 @@ declare global {
   }
 }
 
-/** Sends an event only when the Meta Pixel is available in the browser. */
-export function trackMetaEvent(eventName: string, parameters?: MetaPixelParameters) {
-  if (typeof window === 'undefined' || typeof window.fbq !== 'function') return;
-
-  window.fbq('track', eventName, parameters);
+/** Disabled until optional analytics and advertising preferences are implemented. */
+export function trackMetaEvent(_eventName: string, _parameters?: MetaPixelParameters) {
+  return;
 }
 
 export function trackMetaPageView() {

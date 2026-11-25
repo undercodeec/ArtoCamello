@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Eye, EyeOff, Loader2, Mail } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import illustration from 'figma:asset/62a7846a80b09f8084074694693eb26e2a63983f.png';
 import { useAuth } from '@/shared/context/AuthContext';
 import { UserRole } from '@/domain/types';
@@ -15,6 +15,7 @@ interface SignUpModalProps {
 }
 
 type View = 'login' | 'signup' | 'recovery';
+const TERMS_VERSION = '2026-11-25-borrador-2';
 const fieldClass = 'w-full rounded-lg border border-gray-300 px-4 py-3 text-[#101828] outline-none transition focus:border-[#101828] focus:ring-2 focus:ring-[#FFCA0C]/40';
 
 export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpModalProps) {
@@ -29,6 +30,8 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
   const [success, setSuccess] = useState('');
   const [captchaToken, setCaptchaToken] = useState('');
   const [captchaReset, setCaptchaReset] = useState(0);
+  const [adultDeclaration, setAdultDeclaration] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const navigate = useNavigate();
   const { login, register } = useAuth();
 
@@ -42,6 +45,8 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
     setConfirmPassword('');
     setShowPassword(false);
     setCaptchaToken('');
+    setAdultDeclaration(false);
+    setTermsAccepted(false);
     setError('');
     setEmailNotRegistered(false);
     setSuccess('');
@@ -51,6 +56,8 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
   const changeView = (next: View) => {
     setView(next);
     setCaptchaToken('');
+    setAdultDeclaration(false);
+    setTermsAccepted(false);
     setError('');
     setEmailNotRegistered(false);
     setSuccess('');
@@ -73,6 +80,7 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
         else if (user.role === UserRole.GUEST) navigate('/onboarding');
         else { const returnTo = sessionStorage.getItem('authReturnTo'); sessionStorage.removeItem('authReturnTo'); navigate(returnTo?.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/mis-solicitudes'); }
       } else {
+        if (!adultDeclaration || !termsAccepted) { setError('Confirma tu mayoría de edad y acepta los términos de servicio.'); return; }
         if (recaptchaConfigured && !captchaToken) { setError('Completa la verificación de seguridad.'); return; }
         if (password !== confirmPassword) {
           setError('Las contraseñas no coinciden.');
@@ -84,6 +92,9 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
           password,
           fullName: localPart.length >= 2 ? localPart : 'Cliente',
           role: UserRole.GUEST,
+          adultDeclaration,
+          termsAccepted,
+          termsVersion: TERMS_VERSION,
           ...(captchaToken ? { captchaToken } : {}),
         });
         trackMetaEvent('CompleteRegistration');
@@ -173,12 +184,16 @@ export function SignUpModal({ isOpen, onClose, initialView = 'signup' }: SignUpM
                 {view === 'login' && (
                   <button type="button" onClick={() => changeView('recovery')} className="block text-sm font-semibold text-[#404145] underline underline-offset-2 hover:text-[#9A6500]">¿Olvidaste tu contraseña?</button>
                 )}
+                {view === 'signup' && <div className="space-y-3 text-sm text-[#404145]">
+                  <label className="flex items-start gap-3"><input type="checkbox" required checked={adultDeclaration} onChange={event => setAdultDeclaration(event.target.checked)} className="mt-1 accent-[#101828]" /><span>Declaro que soy mayor de 18 años y tengo capacidad para contratar. Si actúo en nombre de otra persona o empresa, cuento con autorización para representarla.</span></label>
+                  <label className="flex items-start gap-3"><input type="checkbox" required checked={termsAccepted} onChange={event => setTermsAccepted(event.target.checked)} className="mt-1 accent-[#101828]" /><span>Acepto los <Link to="/terminos-de-servicio" target="_blank" rel="noopener noreferrer" className="underline">términos de servicio</Link>.</span></label>
+                </div>}
                 <button type="submit" disabled={loading} className="flex w-full items-center justify-center rounded-lg bg-[#101828] px-4 py-3 font-semibold text-white transition hover:bg-[#26354d] disabled:cursor-not-allowed disabled:opacity-60">
                   {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-label="Procesando" /> : view === 'login' ? 'Iniciar sesión' : view === 'signup' ? 'Crear cuenta' : 'Enviar enlace'}
                 </button>
               </form>
             )}
-            {view === 'signup' && <p className="mt-6 text-xs leading-relaxed text-gray-500">Al unirte, aceptas los términos de servicio y la política de privacidad de ArtoCamello.</p>}
+            {view === 'signup' && <p className="mt-6 text-xs leading-relaxed text-gray-500">Consulta cómo tratamos tus datos en nuestra <Link to="/politica-de-privacidad" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#101828]">política de privacidad</Link>.</p>}
           </div>
         </div>
       </div>

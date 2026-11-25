@@ -16,9 +16,9 @@ export function Footer() {
     // Para Profesionales
     'Registrarte gratis': '#open-login',
     'Área profesional': '/pro',
-    // ArtoCamello (placeholder anchors until dedicated pages exist)
-    'Términos de servicio': '/#terminos',
-    'Política de privacidad': '/#privacidad',
+    // ArtoCamello
+    'Términos de servicio': '/terminos-de-servicio',
+    'Política de privacidad': '/politica-de-privacidad',
     'Ayuda y soporte': '/#ayuda',
   };
 

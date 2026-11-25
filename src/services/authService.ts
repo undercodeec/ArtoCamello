@@ -133,7 +133,7 @@ export async function resetPassword(token: string, password: string): Promise<st
 /**
  * Register a new user. Support verification flow.
  */
-export async function register(data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string }): Promise<{ requiresVerification: boolean, message: string; user?: User }> {
+export async function register(data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string; adultDeclaration: boolean; termsAccepted: boolean; termsVersion: string }): Promise<{ requiresVerification: boolean, message: string; user?: User }> {
   const response = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

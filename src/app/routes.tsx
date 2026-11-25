@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, ScrollRestoration } from "react-router";
+import { lazy, Suspense } from "react";
 import { Layout } from "./components/Layout";
 import { HomePage } from "./components/HomePage";
 import { ProPage } from "./components/ProPage";
@@ -28,14 +29,15 @@ import { AdminLogin } from "./components/admin/AdminLogin";
 import { AdminDemo } from "./components/admin/AdminDemo";
 import { isAdminHost, isLocalAdminPreview } from './adminHost';
 import { isAdminDemoAvailable } from './adminPreview';
-import { MetaPixelPageViewTracker } from '@/shared/components/MetaPixelPageViewTracker';
+
+const LegalDocumentPage = lazy(() => import('./pages/LegalDocumentPage').then(module => ({ default: module.LegalDocumentPage })));
+const legalLoading = <p role="status" className="mx-auto max-w-4xl px-4 py-12 text-gray-600">Cargando documento…</p>;
 
 const publicRoutes = [
   {
     element: (
       <>
         <GlobalPreloader />
-        <MetaPixelPageViewTracker />
         <ScrollRestoration />
         <Outlet />
       </>
@@ -51,6 +53,8 @@ const publicRoutes = [
           { path: "profile/:id", Component: ProProfilePage },
           { path: "recuperar-contrasena", Component: ResetPasswordPage },
           { path: "verificar-correo", Component: VerifyEmailPage },
+          { path: "politica-de-privacidad", element: <Suspense fallback={legalLoading}><LegalDocumentPage document="privacy" /></Suspense> },
+          { path: "terminos-de-servicio", element: <Suspense fallback={legalLoading}><LegalDocumentPage document="terms" /></Suspense> },
           { path: "publicar-servicio", element: <Navigate to="/mis-solicitudes" replace /> },
           {
             path: "mis-solicitudes",

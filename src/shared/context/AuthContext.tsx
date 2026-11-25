@@ -14,7 +14,7 @@ interface AuthContextType {
   auth: AuthState;
   user: User | null;
   login: (email: string, password: string) => Promise<User>;
-  register: (data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string }) => Promise<{ requiresVerification: boolean, message: string; user?: User }>;
+  register: (data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string; adultDeclaration: boolean; termsAccepted: boolean; termsVersion: string }) => Promise<{ requiresVerification: boolean, message: string; user?: User }>;
   updateRole: (role: 'client' | 'pro', profile?: { fullName: string; phone: string }) => Promise<User>;
   logout: () => void;
   isClient: boolean;
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return u;
   }, [refresh]);
 
-  const register = useCallback(async (data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string }) => {
+  const register = useCallback(async (data: { email: string; password: string; fullName: string; role: UserRole; phone?: string; captchaToken?: string; adultDeclaration: boolean; termsAccepted: boolean; termsVersion: string }) => {
     const response = await registerService(data);
     refresh();
     return response;

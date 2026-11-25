@@ -386,9 +386,10 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     for (let attempt = 0; attempt < 8; attempt++) assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 401);
     assert.equal((await call('/api/auth/login', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'incorrect-password' })).status, 429);
     assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: 'bad', password: 'short', fullName: 'A' })).status, 400);
-    assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`.toUpperCase(), password: 'strong-test-password', fullName: 'Duplicate' })).status, 400);
-    for (let attempt = 0; attempt < 19; attempt++) assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 400);
-    assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists' })).status, 429);
+    const registrationTerms = { adultDeclaration: true, termsAccepted: true, termsVersion: '2026-11-25-borrador-2' };
+    assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`.toUpperCase(), password: 'strong-test-password', fullName: 'Duplicate', ...registrationTerms })).status, 400);
+    for (let attempt = 0; attempt < 19; attempt++) assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists', ...registrationTerms })).status, 400);
+    assert.equal((await call('/api/auth/register', ids.a, 'POST', { email: `${ids.a}@example.test`, password: 'strong-test-password', fullName: 'Already Exists', ...registrationTerms })).status, 429);
 
     const previousSmtpUser = process.env.SMTP_USER;
     const previousSmtpPass = process.env.SMTP_PASS;

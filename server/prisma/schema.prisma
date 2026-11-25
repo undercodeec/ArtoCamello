@@ -45,6 +45,8 @@ model User {
   phone             String?
   avatarUrl         String?
   emailVerified     Boolean  @default(false)
+  termsAcceptedAt   DateTime?
+  termsVersion      String?
   verificationToken String?  @unique
   createdAt         DateTime @default(now())
 

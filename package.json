@@ -14,7 +14,8 @@
     "dev:server": "pnpm --dir server dev",
     "build:server": "pnpm --dir server build",
     "test:integration": "pnpm --dir server test:integration",
-    "test:seo": "node --test test/seo-files.test.mjs"
+    "test:seo": "node --test test/seo-files.test.mjs",
+    "test:privacy": "node --test test/analytics-disabled.test.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -64,6 +65,7 @@
     "react-dnd-html5-backend": "16.0.1",
     "react-dom": "18.3.1",
     "react-hook-form": "7.55.0",
+    "react-markdown": "^10.1.0",
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
     "react-responsive-masonry": "2.7.1",

@@ -48,12 +48,19 @@ test('registration requires email confirmation before issuing a session', async 
   try {
     await prisma.tenant.create({ data: { id: tenantId, slug: tenantId, name: 'Test email verification' } });
     await prisma.tenantDomain.create({ data: { tenantId, hostname, isPrimary: true } });
-    const registered = await call('/api/auth/register', 'POST', { email, password: 'strong-password-123', fullName: 'Cliente Prueba', captchaToken: 'valid' });
+    const registration = { email, password: 'strong-password-123', fullName: 'Cliente Prueba', captchaToken: 'valid', adultDeclaration: true, termsAccepted: true, termsVersion: '2026-11-25-borrador-2' };
+    for (const invalid of [{ adultDeclaration: false }, { adultDeclaration: 'true' }, { termsAccepted: false }, { termsVersion: 'antigua' }]) {
+      assert.equal((await call('/api/auth/register', 'POST', { ...registration, ...invalid })).status, 400);
+      assert.equal(await prisma.user.count({ where: { email } }), 0);
+    }
+    const registered = await call('/api/auth/register', 'POST', registration);
     assert.equal(registered.status, 201, JSON.stringify(registered.body));
     assert.equal(registered.body.requiresVerification, true);
     assert.equal(registered.body.token, undefined);
     const user = await prisma.user.findUniqueOrThrow({ where: { email } });
     assert.equal(user.emailVerified, false);
+    assert.equal(user.termsVersion, registration.termsVersion);
+    assert.ok(user.termsAcceptedAt instanceof Date);
     assert.equal(sentMail.length, 1);
     assert.match(sentMail[0].text, /verificar-correo/);
     const verificationUrl = sentMail[0].text.match(/https?:\/\/\S+\/verificar-correo#token=[A-Za-z0-9_-]+/)?.[0];
