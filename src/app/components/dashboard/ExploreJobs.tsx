@@ -78,7 +78,7 @@ export function ExploreJobs() {
         content_ids: [jobId],
         content_type: 'service',
         currency: 'USD',
-        value: job?.costUSD ?? (job ? Math.max(job.estimatedBudget * 0.06, 3) : undefined),
+        value: job?.costUSD,
       });
       window.location.href = result.checkoutUrl;
     } catch (error) { setErrorMsg({ id: jobId, msg: (error as Error).message }); setLoadingPayment(null); }
@@ -166,8 +166,7 @@ export function ExploreJobs() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {filteredJobs.map((job) => {
             const category = getCategoryBySlug(job.categorySlug);
-            // costUSD viene del backend ya calculado; si no, calculamos localmente
-            const costUSD = job.costUSD ?? Math.max(job.estimatedBudget * 0.06, 3);
+            const costUSD = job.costUSD;
             const already = purchasedSet.has(job.id);
             const maxProfessionals = job.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
             const limitReached = job.purchaseCount >= maxProfessionals;

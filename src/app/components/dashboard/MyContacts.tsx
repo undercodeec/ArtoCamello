@@ -53,7 +53,7 @@ interface InboxCardProps {
 
 function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, transferPayment, payphoneAvailable, cardAvailable }: InboxCardProps) {
   const category = getCategoryBySlug(job.categorySlug);
-  const costUSD = job.costUSD ?? Math.max(job.estimatedBudget * 0.06, 3);
+  const costUSD = job.costUSD;
   const maxProfessionals = job.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
   const slotsLeft = maxProfessionals - job.purchaseCount;
   const limitReached = job.purchaseCount >= maxProfessionals;
@@ -247,6 +247,7 @@ function UnlockedCard({ contact, index, total, quote, onSubmitQuote }: { contact
         <div className="bg-gray-50 rounded-xl p-4 space-y-1">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Trabajo solicitado</p>
           <p className="font-semibold text-[#101828]">{contact.requestTitle}</p>
+          {contact.description && <p className="whitespace-pre-wrap text-sm text-gray-700">{contact.description}</p>}
           <p className="text-sm text-gray-500 flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5" /> {contact.location}
           </p>
@@ -475,7 +476,7 @@ export function MyContacts() {
         content_ids: [jobId],
         content_type: 'service',
         currency: 'USD',
-        value: job?.costUSD ?? (job ? Math.max(job.estimatedBudget * 0.06, 3) : undefined),
+        value: job?.costUSD,
       });
       window.location.href = result.checkoutUrl;
     } catch (error) { setPayError({ id: jobId, msg: (error as Error).message }); setPayingId(null); }
@@ -532,8 +533,8 @@ export function MyContacts() {
         <div>
           <p className="text-sm font-semibold text-blue-800">¿Cómo funciona?</p>
           <p className="text-sm text-blue-700 mt-0.5">
-            Ves la descripción y ubicación del trabajo. El nombre, teléfono y correo del cliente se revelan
-            cuando se valida el <strong>pago del costo indicado</strong> para ese contacto.
+             Antes de pagar ves la categoría, ciudad si está disponible, urgencia y presupuesto estimado. La descripción, dirección y datos de contacto se revelan
+             cuando se valida el <strong>pago del costo indicado</strong> para ese contacto.
           </p>
         </div>
       </div>

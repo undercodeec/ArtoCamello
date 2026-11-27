@@ -93,6 +93,7 @@ export interface ServiceRequest {
   visibility?: 'direct' | 'marketplace' | 'legacy_unclassified';
   targetProfessionalUserId?: string | null;
   canEdit?: boolean;
+  reviewed?: boolean;
   urgency: UrgencyLevel;
   preferredDate?: string;
   status: RequestStatus;
@@ -100,7 +101,7 @@ export interface ServiceRequest {
   contactEmail: string;
   contactName?: string;
   estimatedBudget: number;  // Presupuesto estimado del trabajo en USD
-  costUSD?: number;         // Costo calculado por el backend (6% de estimatedBudget)
+  costUSD?: number;         // Costo calculado por el backend según la configuración del tenant
   maxProfessionalsPerLead?: number;
   purchaseCount: number;    // Cuántos pros compraron este lead (máx 4)
   createdAt: string;
@@ -108,8 +109,8 @@ export interface ServiceRequest {
 }
 
 export type ProfessionalRequestPreview = Pick<ServiceRequest,
-  'id' | 'categorySlug' | 'title' | 'urgency' | 'estimatedBudget' | 'purchaseCount' | 'createdAt' | 'status' | 'costUSD' | 'maxProfessionalsPerLead'
-> & { city: string | null; visibility: 'direct' | 'marketplace' };
+  'id' | 'categorySlug' | 'title' | 'urgency' | 'estimatedBudget' | 'purchaseCount' | 'createdAt' | 'status' | 'maxProfessionalsPerLead'
+> & { costUSD: number; city: string | null; visibility: 'direct' | 'marketplace' };
 
 export type PublicServiceRequestPreview = Pick<ServiceRequest,
   'id' | 'categorySlug' | 'title' | 'urgency' | 'estimatedBudget' | 'createdAt'

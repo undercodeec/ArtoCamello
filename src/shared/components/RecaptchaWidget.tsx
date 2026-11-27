@@ -8,13 +8,13 @@ let scriptPromise: Promise<void> | null = null;
 
 function loadScript(): Promise<void> {
   if (scriptPromise) return scriptPromise;
-  if (window.grecaptcha?.ready) return new Promise(resolve => window.grecaptcha!.ready(resolve));
-  if (!scriptPromise) scriptPromise = new Promise((resolve, reject) => {
+  if (window.grecaptcha?.ready) return new Promise<void>(resolve => window.grecaptcha!.ready(() => resolve()));
+  if (!scriptPromise) scriptPromise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script');
     script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
     script.async = true;
     script.onload = () => {
-      if (window.grecaptcha?.ready) window.grecaptcha.ready(resolve);
+      if (window.grecaptcha?.ready) window.grecaptcha.ready(() => resolve());
       else reject(new Error('No se pudo cargar la verificación de seguridad.'));
     };
     script.onerror = () => { script.remove(); reject(new Error('No se pudo cargar la verificación de seguridad.')); };

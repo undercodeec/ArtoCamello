@@ -7,6 +7,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { createSmtpTransport, smtpFrom } from './mail';
+import { notifyRejectedTransfer } from './userNotifications';
 import { verifyAdminEmailSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 import { sendTransferReceipt } from './transferReceipt';
@@ -221,6 +222,8 @@ export function adminRouter(db: PrismaClient, secret: string) {
     });
     if (!updated) { res.status(409).json({ error: 'Transferencia no pendiente de revisión' }); return; }
     res.json({ payment: updated });
+    void notifyRejectedTransfer(db, c.tenantId, updated.payerUserId, updated.reference, req.hostname)
+      .catch(error => console.error('No se pudo avisar al profesional del comprobante rechazado:', error));
   }));
   router.get('/files/:id', allow('payments.read'), wrap(async (req, res) => {
     const c = req.admin!;
@@ -278,8 +281,15 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (typeof verified !== 'boolean') { res.status(400).json({ error: 'verified requerido' }); return; }
     const profile = await db.professionalProfile.findFirst({ where: { userId: req.params.id, user: { tenantId: c.tenantId } } });
     if (!profile) { res.status(404).end(); return; }
-    if (verified && canonicalServiceCategories(profile.categories).length === 0) { res.status(409).json({ error: 'El profesional debe seleccionar al menos un servicio antes de verificar su perfil.' }); return; }
-    await db.$transaction(async tx => { await tx.professionalProfile.update({ where: { id: profile.id }, data: { verified } }); await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'professionals.verify', entityType: 'ProfessionalProfile', entityId: profile.id, before: { verified: profile.verified }, after: { verified }, ip: req.ip } }); });
+    const result = await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`pro-profile:${c.tenantId}:${profile.userId}`}))`;
+      const current = await tx.professionalProfile.findUniqueOrThrow({ where: { id: profile.id } });
+      if (verified && canonicalServiceCategories(current.categories).length === 0) return false;
+      await tx.professionalProfile.update({ where: { id: profile.id }, data: { verified } });
+      await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'professionals.verify', entityType: 'ProfessionalProfile', entityId: profile.id, before: { verified: current.verified }, after: { verified }, ip: req.ip } });
+      return true;
+    });
+    if (!result) { res.status(409).json({ error: 'El profesional debe seleccionar al menos un servicio antes de verificar su perfil.' }); return; }
     res.json({ verified });
   }));
   router.get('/memberships', allow('admins.read'), wrap(async (req, res) => { res.json(await db.tenantMembership.findMany({ where: { tenantId: req.admin!.tenantId }, include: { user: { select: { id: true, email: true, fullName: true } }, role: { select: { id: true, code: true, name: true } } }, orderBy: { invitedAt: 'desc' } })); }));

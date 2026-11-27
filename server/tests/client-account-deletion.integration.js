@@ -51,6 +51,7 @@ test('client deletion needs password, redacts requests and invalidates old sessi
       status: 'quotes_received', purchaseCount: 1,
     } });
     await prisma.leadPurchase.create({ data: { tenantId, requestId: service.id, professionalId: pro.id, costUSD: 5, status: 'paid' } });
+    const pending = await prisma.payment.create({ data: { tenantId, payerUserId: proId, amount: 5, method: 'transfer', status: 'under_review', reference: `pending-${suffix}`, metadata: { requestId: service.id } } });
 
     const professionalDeletion = await call('/api/client/account', 'DELETE', token(proId), { password, confirmation: 'ELIMINAR' });
     assert.equal(professionalDeletion.status, 403, JSON.stringify(professionalDeletion.body));
@@ -58,6 +59,9 @@ test('client deletion needs password, redacts requests and invalidates old sessi
     assert.equal((await call('/api/client/account', 'DELETE', token(clientId), { password: 'wrong', confirmation: 'ELIMINAR' })).status, 401);
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: clientId } })).active, true);
 
+    assert.equal((await call('/api/client/account', 'DELETE', token(clientId), { password, confirmation: 'ELIMINAR' })).status, 409);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: clientId } })).active, true);
+    await prisma.payment.update({ where: { id: pending.id }, data: { status: 'rejected' } });
     const deleted = await call('/api/client/account', 'DELETE', token(clientId), { password, confirmation: 'ELIMINAR' });
     assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
     const closedUser = await prisma.user.findUniqueOrThrow({ where: { id: clientId } });
@@ -79,6 +83,7 @@ test('client deletion needs password, redacts requests and invalidates old sessi
     assert.equal(sentMail[0].to, email);
   } finally {
     await new Promise(resolve => server.close(resolve));
+    await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.leadPurchase.deleteMany({ where: { tenantId } });
     await prisma.serviceRequest.deleteMany({ where: { tenantId } });
     await prisma.professionalProfile.deleteMany({ where: { tenantId } });

@@ -45,6 +45,7 @@ export async function submitQuote(payload: SubmitQuotePayload): Promise<Quote> {
  */
 export async function listQuotesByRequest(requestId: string): Promise<Array<{
   quote: Quote;
+  professionalUserId: string;
   professionalName: string;
   professionalRating: number;
   professionalReviewCount: number;
@@ -70,7 +71,11 @@ export async function acceptQuote(quoteId: string): Promise<boolean> {
     headers: getAuthHeader(),
   });
 
-  return response.ok;
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || 'No se pudo elegir al profesional.');
+  }
+  return true;
 }
 
 /**

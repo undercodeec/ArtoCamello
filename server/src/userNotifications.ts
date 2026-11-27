@@ -35,3 +35,14 @@ export async function notifyAccountClosed(email: string, role: 'client' | 'pro')
     text: `Se cerró tu cuenta de ${role === 'pro' ? 'profesional' : 'cliente'} en ArtoCamello. Si no solicitaste este cierre, contacta a soporte por el canal habitual. No envíes contraseñas por correo.`,
   });
 }
+
+/** Transactional payment notice: never include proof images or bank account details. */
+export async function notifyRejectedTransfer(db: PrismaClient, tenantId: string, payerUserId: string, reference: string, hostname: string): Promise<void> {
+  const payer = await db.user.findFirst({ where: { id: payerUserId, tenantId, role: 'pro', active: true, emailVerified: true }, select: { email: true } });
+  if (!payer) return;
+  const url = `${await publicBaseUrl(db, tenantId, hostname)}/dashboard/contacts`;
+  await createSmtpTransport().sendMail({
+    from: smtpFrom(), to: payer.email, subject: 'Revisa tu comprobante de transferencia - ArtoCamello',
+    text: `El comprobante de la transferencia ${reference} no fue aprobado. Entra en ${url} y revisa el motivo en el estado del pago antes de reenviarlo. Si ya se debitó el importe, contacta a soporte.`,
+  });
+}

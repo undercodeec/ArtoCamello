@@ -38,6 +38,7 @@ export interface UnlockedContact {
     payphoneTransactionId?: string;
   };
   requestTitle: string;
+  description: string;
   clientName: string;
   clientPhone: string;
   clientEmail: string;

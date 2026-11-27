@@ -8,7 +8,7 @@ import {
 import { MAX_PROFESSIONALS_PER_REQUEST } from '@/domain/constants';
 import { listRequestsByClient, cancelRequest, completeRequest, updateServiceRequest } from '@/services/requestService';
 import { listQuotesByRequest, acceptQuote } from '@/services/quoteService';
-import { getReviewByRequest } from '@/services/reviewService';
+import { postReview } from '@/services/professionalService';
 import { getCurrentAuth } from '@/services/authService';
 
 export function MyRequestsPage() {
@@ -20,6 +20,12 @@ export function MyRequestsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<ServiceRequest>>({});
   const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [quoteLoadError, setQuoteLoadError] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [rating, setRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [quotesMap, setQuotesMap] = useState<Record<string, Awaited<ReturnType<typeof listQuotesByRequest>>>>({});
   const auth = getCurrentAuth();
@@ -31,12 +37,14 @@ export function MyRequestsPage() {
   const loadRequests = async () => {
     setLoadingRequests(true);
     setLoadError('');
+    setQuoteLoadError(false);
     if (auth.userId) {
       try {
         const reqs = await listRequestsByClient(auth.userId);
         setRequests(reqs);
         // Pre-load quotes for requests that have them
         const qMap: any = {};
+        let quoteFailed = false;
         await Promise.all(
           reqs.map(async (r) => {
             try {
@@ -45,11 +53,13 @@ export function MyRequestsPage() {
                 qMap[r.id] = quotes;
               }
             } catch (err) {
+              quoteFailed = true;
               console.error(`Error loading quotes for request ${r.id}:`, err);
             }
           })
         );
         setQuotesMap(qMap);
+        setQuoteLoadError(quoteFailed);
       } catch (error) {
         console.error("Failed to load requests:", error);
         setLoadError(error instanceof Error ? error.message : 'No se pudieron cargar tus solicitudes.');
@@ -59,12 +69,14 @@ export function MyRequestsPage() {
   };
 
   const handleCancelRequest = async (id: string) => {
+    setActionBusy(true); setActionError(''); setActionSuccess('');
     try {
       const result = await cancelRequest(id);
       if (!result) throw new Error('No se pudo cancelar. Es posible que el estado haya cambiado.');
       setCancelModalOpen(null);
       await loadRequests();
     } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo cancelar.'); }
+    finally { setActionBusy(false); }
   };
 
   const saveEdit = async (id: string) => {
@@ -86,8 +98,36 @@ export function MyRequestsPage() {
   };
 
   const handleAcceptQuote = async (quoteId: string) => {
-    await acceptQuote(quoteId);
-    loadRequests();
+    setActionBusy(true); setActionError(''); setActionSuccess('');
+    try {
+      if (!await acceptQuote(quoteId)) throw new Error('No se pudo elegir al profesional. Verifica si hay pagos en curso o si cambió el estado de la solicitud.');
+      await loadRequests();
+      setActionSuccess('Profesional elegido. Cuando termine el trabajo, marca la solicitud como completada.');
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo elegir al profesional.'); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleComplete = async (id: string) => {
+    setActionBusy(true); setActionError(''); setActionSuccess('');
+    try {
+      if (!await completeRequest(id)) throw new Error('No se pudo completar la solicitud. Comprueba su estado.');
+      await loadRequests();
+      setActionSuccess('Trabajo marcado como completado. Ya puedes dejar una reseña.');
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo completar la solicitud.'); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleReview = async (requestId: string, professionalUserId: string) => {
+    setActionError(''); setActionSuccess('');
+    if (!rating || !reviewComment.trim()) { setActionError('Selecciona una calificación y escribe un comentario.'); return; }
+    setActionBusy(true);
+    try {
+      await postReview(professionalUserId, requestId, rating, reviewComment.trim());
+      setReviewingId(null); setRating(0); setReviewComment('');
+      await loadRequests();
+      setActionSuccess('Reseña publicada. Gracias por compartir tu experiencia.');
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : 'No se pudo publicar la reseña.'); }
+    finally { setActionBusy(false); }
   };
 
   const getStatusConfig = (status: RequestStatus) => {
@@ -125,6 +165,8 @@ export function MyRequestsPage() {
         </div>
         <PublishServiceForm onPublished={loadRequests} />
         {actionError && <p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{actionError}</p>}
+        {actionSuccess && <p role="status" className="rounded-lg bg-green-50 p-4 text-sm text-green-800">{actionSuccess}</p>}
+        {quoteLoadError && <div role="alert" className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">Algunas cotizaciones no se pudieron cargar. <button type="button" onClick={loadRequests} className="font-semibold underline">Reintentar</button></div>}
 
         {loadingRequests ? (
           <div role="status" className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-600">Cargando tus solicitudes...</div>
@@ -145,7 +187,7 @@ export function MyRequestsPage() {
               const StatusIcon = getStatusConfig(request.status).icon;
               const quotes = quotesMap[request.id] || [];
               const maxProfessionals = request.maxProfessionalsPerLead || MAX_PROFESSIONALS_PER_REQUEST;
-              const hasReview = !!getReviewByRequest(request.id);
+              const acceptedQuote = quotes.find(item => item.quote.status === QuoteStatus.ACCEPTED);
               const isExpanded = expandedId === request.id;
 
               return (
@@ -257,6 +299,7 @@ export function MyRequestsPage() {
                                       request.status !== RequestStatus.COMPLETED && (
                                         <button
                                           onClick={() => handleAcceptQuote(quote.id)}
+                                          disabled={actionBusy}
                                           className="bg-[#101828] hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors"
                                         >
                                           Elegir profesional
@@ -284,12 +327,19 @@ export function MyRequestsPage() {
                       </div>
                     )}
 
-                    {/* Review CTA for completed requests */}
-                    {request.status === RequestStatus.COMPLETED && !hasReview && (
+                    {request.status === RequestStatus.HIRED && (
                       <div className="flex justify-end border-t border-gray-100 pt-4 mt-2">
-                        <button className="bg-[#FFCA0C] hover:bg-[#e6b600] text-[#101828] px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
-                          <Star className="w-4 h-4" /> Dejar reseña
-                        </button>
+                        <button type="button" disabled={actionBusy} onClick={() => handleComplete(request.id)} className="rounded-lg bg-[#101828] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Marcar trabajo como completado</button>
+                      </div>
+                    )}
+                    {/* Reviews are tied to the accepted quote and a completed request. */}
+                    {request.status === RequestStatus.COMPLETED && !request.reviewed && acceptedQuote && (
+                      <div className="flex justify-end border-t border-gray-100 pt-4 mt-2">
+                        {reviewingId === request.id ? <div className="w-full space-y-3">
+                          <label className="block text-sm font-semibold">Calificación para {acceptedQuote.professionalName}<select value={rating} onChange={event => setRating(Number(event.target.value))} className="mt-1 block w-full rounded-lg border p-2" required><option value={0}>Elige de 1 a 5 estrellas</option>{[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>{value} estrella{value === 1 ? '' : 's'}</option>)}</select></label>
+                          <label className="block text-sm font-semibold">Tu experiencia<textarea value={reviewComment} onChange={event => setReviewComment(event.target.value)} maxLength={2000} required className="mt-1 block w-full rounded-lg border p-2" /></label>
+                          <div className="flex gap-3"><button type="button" disabled={actionBusy} onClick={() => handleReview(request.id, acceptedQuote.professionalUserId)} className="rounded-lg bg-[#101828] px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{actionBusy ? 'Publicando...' : 'Publicar reseña'}</button><button type="button" onClick={() => setReviewingId(null)} className="text-sm font-semibold underline">Cerrar</button></div>
+                        </div> : <button type="button" onClick={() => { setReviewingId(request.id); setRating(0); setReviewComment(''); }} className="bg-[#FFCA0C] hover:bg-[#e6b600] text-[#101828] px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2"><Star className="w-4 h-4" /> Dejar reseña</button>}
                       </div>
                     )}
                   </div>
@@ -310,7 +360,7 @@ export function MyRequestsPage() {
               </div>
               <h3 className="text-xl font-bold text-[#101828] mb-2">¿Cancelar esta solicitud?</h3>
               <p className="text-gray-600 mb-6">
-                Si ya resolviste el problema o contrataste a alguien, cancela la solicitud para evitar que más profesionales paguen por contactarte.
+                Si ya resolviste el problema o contrataste a alguien, cancela la solicitud para evitar que más profesionales paguen por contactarte. Si hay un pago en curso, primero debes esperar su resolución o contactar a soporte.
               </p>
               <div className="flex gap-3 justify-end">
                 <button
@@ -321,6 +371,7 @@ export function MyRequestsPage() {
                 </button>
                 <button
                   onClick={() => handleCancelRequest(cancelModalOpen)}
+                  disabled={actionBusy}
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors"
                 >
                   Sí, cancelar solicitud

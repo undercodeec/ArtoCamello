@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { BankAccount, TransferPayment, createTransferIntent, getTransferPayment, submitTransferProof } from '@/services/transferService';
+import { BANKS, SEPS_INSTITUTIONS, normalizeInstitutionSearch } from '@/app/constants/financialInstitutions';
 
 const statusLabels: Record<string, string> = {
   awaiting_transfer: 'Esperando comprobante',
@@ -20,6 +21,8 @@ export function TransferPaymentPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [bankName, setBankName] = useState('');
+  const [institutionSearch, setInstitutionSearch] = useState('');
+  const [otherBankName, setOtherBankName] = useState('');
   const [accountLast4, setAccountLast4] = useState('');
   const [transferReference, setTransferReference] = useState('');
   const [transferredAt, setTransferredAt] = useState('');
@@ -76,7 +79,7 @@ export function TransferPaymentPage() {
     setError('');
     try {
       await submitTransferProof(payment.id, {
-        bankName: bankName.trim(), accountLast4: accountLast4.trim(),
+        bankName: (bankName === '__other__' ? otherBankName : bankName).trim(), accountLast4: accountLast4.trim(),
         transferReference: transferReference.trim(),
         transferredAt: new Date(transferredAt).toISOString(),
         declaredAmount: Number(payment.amount).toFixed(2), file,
@@ -125,7 +128,20 @@ export function TransferPaymentPage() {
         {['awaiting_transfer', 'rejected'].includes(payment.status) && <form onSubmit={submit} className="mt-5 space-y-4 border-t pt-5">
           <h2 className="text-xl font-bold text-[#101828]">Enviar comprobante</h2>
           {payment.status === 'rejected' && <p className="text-sm text-red-700">Corrige los datos indicados en la nota de revisión y vuelve a enviar el comprobante.</p>}
-          <label className="block text-sm font-medium">Banco de origen<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={bankName} onChange={event => setBankName(event.target.value)} /></label>
+          <div className="space-y-2">
+            <label htmlFor="institution-search" className="block text-sm font-medium">Buscar banco o cooperativa de origen</label>
+            <input id="institution-search" type="search" className="block w-full rounded-lg border p-2" placeholder="Escribe el nombre de la entidad" value={institutionSearch} onChange={event => setInstitutionSearch(event.target.value)} />
+            <label htmlFor="origin-institution" className="block text-sm font-medium">Selecciona la entidad de origen</label>
+            <select id="origin-institution" required className="block w-full rounded-lg border bg-white p-2" value={bankName} onChange={event => setBankName(event.target.value)}>
+              <option value="">Selecciona un banco o cooperativa</option>
+              {bankName && bankName !== '__other__' && !normalizeInstitutionSearch(bankName).includes(normalizeInstitutionSearch(institutionSearch)) && <option value={bankName}>{bankName}</option>}
+              <optgroup label="Bancos">{BANKS.filter(name => normalizeInstitutionSearch(name).includes(normalizeInstitutionSearch(institutionSearch))).map(name => <option key={name} value={name}>{name}</option>)}</optgroup>
+              <optgroup label="Cooperativas y otras entidades SEPS">{SEPS_INSTITUTIONS.filter(entity => normalizeInstitutionSearch(entity.name).includes(normalizeInstitutionSearch(institutionSearch))).map(entity => <option key={entity.ruc} value={entity.name}>{entity.name}</option>)}</optgroup>
+              <option value="__other__">Otra entidad no listada</option>
+            </select>
+            {bankName === '__other__' && <label className="block text-sm font-medium">Nombre de la entidad<input required pattern=".*\S.*" title="Ingresa el nombre de la entidad" maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={otherBankName} onChange={event => setOtherBankName(event.target.value)} /></label>}
+            <p className="text-xs text-gray-600">Catálogo de referencia; si no encuentras tu entidad, selecciona «Otra entidad no listada».</p>
+          </div>
           <label className="block text-sm font-medium">Últimos 4 dígitos de la cuenta de origen (opcional)<input pattern="[0-9]{4}" maxLength={4} className="mt-1 block w-full rounded-lg border p-2" value={accountLast4} onChange={event => setAccountLast4(event.target.value)} /></label>
           <label className="block text-sm font-medium">Referencia emitida por el banco<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label>
           <div className="text-sm font-medium">Monto exacto a transferir ({payment.currency})<output className="mt-1 block w-full rounded-lg border bg-gray-50 p-2 font-semibold">{Number(payment.amount).toFixed(2)}</output><p className="mt-1 text-xs font-normal text-gray-600">El importe no se puede modificar. Si transferiste otro monto, contacta a soporte antes de enviar el comprobante.</p></div>

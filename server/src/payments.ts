@@ -37,6 +37,23 @@ export async function publicBaseUrl(db: PrismaClient, tenantId: string, hostname
 
 export class PaymentConflict extends Error {}
 
+/** Must run while holding the request advisory lock used by payment creation. */
+export async function hasUnresolvedRequestPayment(tx: Prisma.TransactionClient, tenantId: string, requestId: string): Promise<boolean> {
+  const purchases = await tx.leadPurchase.findMany({ where: { tenantId, requestId }, select: { id: true } });
+  const active = await tx.payment.findFirst({ where: {
+    tenantId,
+    OR: [
+      { metadata: { path: ['requestId'], equals: requestId } },
+      ...purchases.map(purchase => ({ metadata: { path: ['leadPurchaseId'], equals: purchase.id } })),
+    ],
+    AND: [{ OR: [
+      { status: { in: ['under_review', 'approved'] } },
+      { status: { in: ['created', 'awaiting_transfer', 'pending_provider'] }, expiresAt: { gt: new Date() } },
+    ] }],
+  }, select: { id: true } });
+  return Boolean(active);
+}
+
 export async function expirePendingPayments(db: PrismaClient) {
   const candidates = await db.payment.findMany({ where: { status: { in: ['created', 'awaiting_transfer', 'pending_provider'] }, expiresAt: { lt: new Date() } }, select: { id: true, tenantId: true }, take: 200 });
   for (const payment of candidates) await db.$transaction(async tx => {

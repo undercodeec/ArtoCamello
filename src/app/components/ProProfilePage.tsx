@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router';
 import { Star, Trophy, ChevronLeft, ChevronRight, Check, ArrowRight, ChevronDown, Clock, RefreshCw, Languages, HelpCircle, X, MapPin, Calendar, Map, Heart, Video } from 'lucide-react';
 import mapImage from 'figma:asset/217acabfcd1de0fb0c010dbd96a25fa14b2c6b3f.png';
 import { SignUpModal } from './SignUpModal';
-import { getProfessionalById, PublicProfessional, postReview, getPublicProfessionals } from '@/services/professionalService';
+import { getProfessionalById, PublicProfessional, getPublicProfessionals } from '@/services/professionalService';
 import { toast } from 'sonner';
 import { getQuestionsForCategories } from '../constants/serviceQuestions';
 import { trackMetaEvent } from '@/shared/lib/metaPixel';
@@ -197,41 +197,6 @@ export function ProProfilePage() {
     }
   };
 
-  // Review Form State
-  const [newRating, setNewRating] = useState(0);
-  const [newComment, setNewComment] = useState('');
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
-
-  const handlePostReview = async () => {
-    if (!id || !pro) return;
-    if (newRating === 0) {
-      toast.error("Por favor selecciona una calificación de estrellas.");
-      return;
-    }
-    if (newComment.trim().length < 5) {
-      toast.error("El comentario es muy corto.");
-      return;
-    }
-
-    try {
-      setIsSubmittingReview(true);
-      const review = await postReview(id, newRating, newComment);
-      toast.success("¡Gracias por tu reseña!");
-      
-      // Refresh pro data to show new review and updated rating
-      const updatedPro = await getProfessionalById(id);
-      setPro(updatedPro);
-      
-      // Reset form
-      setNewRating(0);
-      setNewComment('');
-    } catch (err: any) {
-      toast.error(err.message || "Error al publicar la reseña");
-    } finally {
-      setIsSubmittingReview(false);
-    }
-  };
-
   useEffect(() => {
     if (!pro) return;
 
@@ -262,7 +227,7 @@ export function ProProfilePage() {
 
   const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicio de ${pro.profile.categories.map(serviceLabel).join(', ')}` : "Servicios profesionales");
   const bio = pro.profile?.bio || `Profesional verificado en ArtoCamello con ${pro.profile?.experienceYears || 0} años de experiencia. Listo para brindar el mejor servicio a tu medida.`;
-  const rating = pro.profile?.rating || 5.0;
+  const rating = pro.profile?.rating || 0;
   const reviews = pro.profile?.reviewCount || 0;
   const queuedJobs = pro.profile?.completedJobs ? Math.max(1, Math.floor(pro.profile.completedJobs * 0.1)) : 1; 
   const avatar = pro.avatarUrl || "https://images.unsplash.com/photo-1622812947502-0a643f17387e?crop=entropy&cs=tinysrgb&fit=facearea&facepad=2&w=256&h=256&q=80";
@@ -498,85 +463,14 @@ export function ProProfilePage() {
                   })}
                 </div>
 
-                {/* Right side: Detailed Breakdown (Mocked as breakdown is deep logic) */}
-                <div className="flex-1">
-                  <h4 className="font-bold text-[#404145] text-[16px] mb-5">Desglose de calificaciones</h4>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between text-[#95979D] font-medium text-[15px]">
-                      <span>Nivel de comunicación</span>
-                      <span className="flex items-center gap-1.5 font-bold text-[#404145]">
-                        <Star className="w-4 h-4 fill-[#222325] text-[#222325]" />
-                        {rating.toFixed(1)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[#95979D] font-medium text-[15px]">
-                      <span>Calidad de la entrega</span>
-                      <span className="flex items-center gap-1.5 font-bold text-[#404145]">
-                        <Star className="w-4 h-4 fill-[#222325] text-[#222325]" />
-                        {rating.toFixed(1)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[#95979D] font-medium text-[15px]">
-                      <span>Valor de la entrega</span>
-                      <span className="flex items-center gap-1.5 font-bold text-[#404145]">
-                        <Star className="w-4 h-4 fill-[#222325] text-[#222325]" />
-                        {rating.toFixed(1)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Leave a Review Form */}
-          <div className="mb-12 bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-            <h3 className="text-xl font-bold text-[#404145] mb-4">Deja tu reseña</h3>
-            
-            {isAuthenticated ? (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-[#404145] font-medium">Tu calificación:</span>
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star 
-                        key={star} 
-                        onClick={() => setNewRating(star)}
-                        className={`w-6 h-6 cursor-pointer transition-colors ${star <= newRating ? 'text-[#FFCA0C] fill-[#FFCA0C]' : 'text-gray-300 hover:text-[#FFCA0C]'}`} 
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <textarea 
-                    rows={4}
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="¿Cómo fue tu experiencia trabajando con este profesional? Cuéntanos los detalles..."
-                    className="w-full border border-gray-300 rounded-lg p-3 text-[#404145] placeholder-gray-400 focus:outline-none focus:border-[#FFCA0C] focus:ring-1 focus:ring-[#FFCA0C] resize-none"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button 
-                    onClick={handlePostReview}
-                    disabled={isSubmittingReview}
-                    className="bg-[#FFCA0C] hover:bg-[#e6b600] text-[#101828] font-bold py-2 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isSubmittingReview ? "Publicando..." : "Publicar reseña"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="bg-gray-50 rounded-lg p-6 text-center">
-                <p className="text-gray-600 mb-4">Debes iniciar sesión y verificar tu correo para poder dejar una reseña.</p>
-                <button 
-                  onClick={() => window.dispatchEvent(new CustomEvent('open-auth-modal', { detail: { view: 'login' } }))}
-                  className="bg-[#101828] hover:bg-[#202c44] text-white font-bold py-2 px-6 rounded-lg transition-colors"
-                >
-                  Iniciar sesión para evaluar
-                </button>
-              </div>
-            )}
+          <div className="mb-12 rounded-xl border border-gray-200 bg-white p-6">
+            <h3 className="text-xl font-bold text-[#404145]">Reseñas de trabajos completados</h3>
+            <p className="mt-2 text-gray-600">Si contrataste a este profesional, podrás valorar el trabajo después de marcarlo como completado en Mis Solicitudes.</p>
+            <button type="button" onClick={() => navigate('/mis-solicitudes')} className="mt-3 font-semibold text-blue-700 underline">Ir a Mis Solicitudes</button>
           </div>
 
           {/* User Comments */}
@@ -683,7 +577,7 @@ export function ProProfilePage() {
                   {/* Rating */}
                   <div className="flex items-center gap-1 mb-3">
                     <Star className="w-4 h-4 text-[#121212] fill-[#121212]" />
-                    <span className="font-bold text-[#404145] text-[15px]">{recPro.profile?.rating?.toFixed(1) || '5.0'}</span>
+                    <span className="font-bold text-[#404145] text-[15px]">{recPro.profile?.reviewCount ? recPro.profile.rating.toFixed(1) : 'Sin reseñas'}</span>
                     <span className="text-[#62646A] text-[15px]">({recPro.profile?.reviewCount || 0})</span>
                   </div>
                   

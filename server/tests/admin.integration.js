@@ -122,9 +122,15 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.ok(!('professionalProfile' in publicDetailBody));
     assert.ok(!JSON.stringify(publicDetailBody).includes('1712345678'));
     assert.ok(!JSON.stringify(publicDetailBody).includes('Private street'));
-    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.a, 'POST', { rating: 5, comment: 'Self review' })).status, 403);
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.a, 'POST', { requestId: crypto.randomUUID(), rating: 5, comment: 'Self review' })).status, 403);
     assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { rating: 6, comment: 'Invalid' })).status, 400);
-    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { rating: 5, comment: 'Own tenant review' })).status, 201);
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { rating: 5, comment: 'No contract' })).status, 400);
+    const reviewRequest = await db.serviceRequest.create({ data: { visibility: 'marketplace', tenantId: tenantA, clientId: ids.client, categorySlug: 'test', city: 'Test', title: 'Reviewed work', description: 'Test', location: 'Test', contactPhone: 'private', contactEmail: 'private@example.test', status: 'completed', estimatedBudget: 100 } });
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { requestId: reviewRequest.id, rating: 5, comment: 'No accepted quote' })).status, 403);
+    await db.quote.create({ data: { tenantId: tenantA, requestId: reviewRequest.id, professionalId: proA.id, status: 'accepted', estimatedPrice: 100, message: 'Test' } });
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.guest, 'POST', { requestId: reviewRequest.id, rating: 5, comment: 'Not my work' })).status, 403);
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { requestId: reviewRequest.id, rating: 5, comment: 'Own tenant review' })).status, 201);
+    assert.equal((await call(`/api/professionals/${ids.a}/reviews`, ids.client, 'POST', { requestId: reviewRequest.id, rating: 1, comment: 'Duplicate' })).status, 409);
     const reviewedDetail = await (await call(`/api/professionals/${ids.a}`, ids.client)).json();
     assert.deepEqual(reviewedDetail.reviews.map(review => review.comment), ['Own tenant review']);
     assert.equal(reviewedDetail.profile.reviewCount, 1);

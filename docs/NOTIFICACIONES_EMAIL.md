@@ -17,7 +17,8 @@ La entrega depende de SMTP. Los avisos de solicitudes, cotizaciones y cierres so
 | Comprobante recibido | Revisores autorizados de pagos; implementado | Aviso interno para revisión, sin adjuntar comprobante. |
 | Transferencia aprobada | Profesional pagador; recibo implementado | No depende de preferencias opcionales; contacto disponible en panel. |
 | Cierre de cuenta | Titular de la cuenta cliente o profesional; implementado | Al correo anterior al cierre, sin contraseña ni datos de terceros; aviso de seguridad. |
-| Comprobante rechazado, pago no asignable o confirmado por otros métodos | Profesional afectado; **pendiente** | Prioritario: requiere integrar todos los estados de pago y garantizar que la notificación no revele información de terceros. |
+| Comprobante de transferencia rechazado | Profesional pagador; implementado | Sin comprobante ni datos bancarios en el mensaje; el motivo está en su panel. Envío de mejor esfuerzo. |
+| Pago no asignable o confirmado por otros métodos | Profesional afectado; **pendiente** | Requiere resolución operativa, notificación y, cuando corresponda, devolución; no prometer contacto automáticamente. |
 | Cotización aceptada/rechazada, cancelación o finalización de solicitud | Participantes afectados; **pendiente** | Valorar correo transaccional solo para quienes intervienen, con reglas anti-duplicados y estado persistido; notificar cancelación a compradores puede ser importante. |
 | Boletines y promociones | **No habilitados** | Registrar una preferencia no autoriza por sí solo el envío; definir base jurídica y mecanismo de baja antes de activarlos. |
 

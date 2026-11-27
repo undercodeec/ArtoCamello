@@ -71,6 +71,7 @@ export function ProProfileSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [verificationPending, setVerificationPending] = useState(false);
 
   // Password change state
   const [currentPwd, setCurrentPwd] = useState('');
@@ -99,6 +100,7 @@ export function ProProfileSettings() {
       .then((r) => r.json())
       .then((data) => {
         if (data.user) {
+          setVerificationPending(data.profile?.verified === false);
           setAccountProvider(data.user.authProvider || 'local');
           setProfile({
             fullName:        data.user.fullName        || '',
@@ -192,7 +194,8 @@ export function ProProfileSettings() {
         }
       } catch { /* ignore */ }
 
-      showToast('success', '¡Perfil guardado correctamente!');
+       if (data.requiresVerification) setVerificationPending(true);
+       showToast('success', data.requiresVerification ? 'Cambios guardados. El perfil requiere nueva verificación antes de recibir solicitudes.' : '¡Perfil guardado correctamente!');
     } catch (err: any) {
       showToast('error', err.message || 'Error al guardar el perfil.');
     } finally {
@@ -328,6 +331,8 @@ export function ProProfileSettings() {
           </button>
         )}
       </div>
+
+      {verificationPending && <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-950">Tu perfil está pendiente de verificación. No aparecerá en las búsquedas ni podrá recibir o comprar nuevas solicitudes hasta que administración lo apruebe.</div>}
 
       {/* Tabs */}
       <div className="flex border-b border-gray-200">

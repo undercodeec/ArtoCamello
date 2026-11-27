@@ -112,6 +112,13 @@ test('a client request appears in client history and matching professional inbox
     const normalizedProfile = await request('/api/profile', 'PUT', professionalToken, { categories: ['Fontaneros', 'Fontanería'] });
     assert.equal(normalizedProfile.status, 200, normalizedProfile.body);
     assert.deepEqual(JSON.parse(normalizedProfile.body).profile.categories, ['fontaneria']);
+    const changedCategories = await request('/api/profile', 'PUT', professionalToken, { categories: ['fontaneria', 'electricidad'] });
+    assert.equal(changedCategories.status, 200, changedCategories.body);
+    assert.equal(JSON.parse(changedCategories.body).requiresVerification, true);
+    assert.equal(JSON.parse(changedCategories.body).profile.verified, false);
+    assert.equal((await request('/api/requests/available', 'GET', professionalToken)).status, 403);
+    await request('/api/profile', 'PUT', professionalToken, { categories: ['fontaneria'] });
+    await prisma.professionalProfile.update({ where: { userId: professionalId }, data: { verified: true } });
 
     const locked = await request('/api/leads/unlocked', 'GET', professionalToken);
     assert.equal(locked.status, 200, locked.body);
@@ -121,6 +128,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(intent.status, 201, intent.body);
     const { payment, bankAccounts } = JSON.parse(intent.body);
     assert.equal(payment.status, 'awaiting_transfer');
+    assert.equal((await request(`/api/requests/${saved.id}/cancel`, 'POST', clientToken)).status, 409);
     assert.equal((await request(`/api/requests/${saved.id}`, 'PATCH', clientToken, { title: 'Cambio durante pago' })).status, 409);
     const ownedDuringPayment = JSON.parse((await request('/api/requests/client', 'GET', clientToken)).body).find(item => item.id === saved.id);
     assert.equal(ownedDuringPayment.canEdit, false);
@@ -139,6 +147,7 @@ test('a client request appears in client history and matching professional inbox
     const contact = JSON.parse(unlocked.body).find(item => item.purchase.requestId === saved.id);
     assert.ok(contact);
     assert.equal(contact.clientName, payload.contactName);
+    assert.equal(contact.description, payload.description);
     assert.equal(contact.clientPhone, payload.contactPhone);
 
     const invalid = await request('/api/requests', 'POST', clientToken, { ...payload, estimatedBudget: 0 });
@@ -179,6 +188,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(directIntent.status, 201, directIntent.body);
     const directPayment = JSON.parse(directIntent.body).payment;
     await prisma.payment.update({ where: { id: directPayment.id }, data: { status: 'under_review' } });
+    assert.equal((await request(`/api/requests/${directId}/cancel`, 'POST', clientToken)).status, 409);
     const allocatedDirect = await allocateLead(prisma, directPayment.id, tenantId, 'test-direct');
     assert.equal(allocatedDirect.status, 'allocated');
     const repeatedDirect = await allocateLead(prisma, directPayment.id, tenantId, 'test-direct-repeat');
@@ -201,9 +211,17 @@ test('a client request appears in client history and matching professional inbox
     await prisma.notificationPreference.create({ data: { tenantId, userId: clientId, key: 'emailQuotes', enabled: false } });
     const quietQuote = await request('/api/quotes', 'POST', professionalToken, { requestId: saved.id, message: 'Otra cotización', estimatedPrice: 25 });
     assert.equal(quietQuote.status, 200, quietQuote.body);
+    const otherPending = await prisma.payment.create({ data: { tenantId, payerUserId: otherProfessionalId, amount: 3, method: 'transfer', status: 'under_review', reference: `other-${suffix}`, metadata: { requestId: saved.id } } });
+    assert.equal((await request(`/api/quotes/${JSON.parse(quietQuote.body).id}/accept`, 'POST', clientToken)).status, 409);
+    await prisma.payment.update({ where: { id: otherPending.id }, data: { status: 'rejected' } });
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(sentMail.length, 2, 'Respeta la preferencia del cliente');
     assert.equal((await request(`/api/requests/${directId}/complete`, 'POST', clientToken)).status, 200);
+    const completedQuotes = JSON.parse((await request(`/api/quotes/request/${directId}`, 'GET', clientToken)).body);
+    assert.equal(completedQuotes.find(item => item.quote.id === quoteId).professionalUserId, professionalId);
+    assert.equal((await request(`/api/professionals/${professionalId}/reviews`, 'POST', clientToken, { requestId: directId, rating: 5, comment: 'Trabajo completado correctamente' })).status, 201);
+    assert.equal((await request(`/api/professionals/${professionalId}/reviews`, 'POST', clientToken, { requestId: directId, rating: 1, comment: 'Duplicado' })).status, 409);
+    assert.equal(JSON.parse((await request('/api/requests/client', 'GET', clientToken)).body).find(item => item.id === directId).reviewed, true);
     assert.equal((await request(`/api/requests/${directId}/cancel`, 'POST', clientToken)).status, 409);
 
     const quarantine = await prisma.serviceRequest.create({ data: {
@@ -247,6 +265,7 @@ test('a client request appears in client history and matching professional inbox
     global.fetch = originalFetch;
     await new Promise(resolve => server.close(resolve));
     await prisma.paymentEvent.deleteMany({ where: { tenantId } });
+    await prisma.review.deleteMany({ where: { tenantId } });
     await prisma.paymentAllocation.deleteMany({ where: { tenantId } });
     await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.leadPurchase.deleteMany({ where: { tenantId } });

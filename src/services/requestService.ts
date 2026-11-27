@@ -135,7 +135,7 @@ export async function cancelRequest(requestId: string): Promise<ServiceRequest |
     headers: { 'Authorization': `Bearer ${token}` }
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) throw await responseError(response, 'No se pudo cancelar la solicitud.');
   return response.json();
 }
 
@@ -151,7 +151,7 @@ export async function completeRequest(requestId: string): Promise<ServiceRequest
     headers: { 'Authorization': `Bearer ${token}` }
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) throw await responseError(response, 'No se pudo completar la solicitud.');
   return response.json();
 }
 

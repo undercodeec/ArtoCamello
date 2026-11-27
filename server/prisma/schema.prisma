@@ -205,6 +205,7 @@ model ServiceRequest {
 
   leadPurchases LeadPurchase[]
   quotes        Quote[]
+  reviews       Review[]
 
   @@index([tenantId, status, createdAt])
   @@index([tenantId, visibility, status, createdAt])
@@ -244,6 +245,9 @@ model LeadPurchase {
 
 model Review {
   id        String   @id @default(uuid())
+  // Legacy reviews have no verifiable request; all new reviews must link to a completed hire.
+  requestId String? @unique
+  request   ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
   tenantId  String   @default("artocamello")
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   rating    Int

@@ -161,6 +161,11 @@ export function transferRouter(db: PrismaClient, secret: string) {
     }
     let result;
     try { result = await db.$transaction(async tx => {
+      const requestId = (payment.metadata as { requestId?: string }).requestId;
+      if (!requestId) return null;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${tenantId}:${requestId}`}))`;
+      const request = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId }, select: { status: true } });
+      if (!request || !isPurchasableRequest(request.status)) return null;
       const changed = await tx.payment.updateMany({ where: { id: payment.id, status: { in: ['awaiting_transfer','rejected'] } }, data: { status: 'under_review' } });
       if (!changed.count) return null;
       const file = await tx.storedFile.create({ data: { tenantId, storageKey, mimeType, size: bytes.length, checksum, createdBy: userId } });

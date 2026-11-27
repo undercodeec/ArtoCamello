@@ -51,7 +51,7 @@ export async function getMyProfessionalProfile(): Promise<{
 /**
  * Publicar una reseña
  */
-export async function postReview(proId: string, rating: number, comment: string) {
+export async function postReview(proId: string, requestId: string, rating: number, comment: string) {
   const { token } = getCurrentAuth();
   if (!token) throw new Error("Debes iniciar sesión para calificar.");
 
@@ -61,7 +61,7 @@ export async function postReview(proId: string, rating: number, comment: string)
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ rating, comment }),
+    body: JSON.stringify({ requestId, rating, comment }),
   });
 
   if (!response.ok) {

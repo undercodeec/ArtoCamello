@@ -9,7 +9,7 @@ import dotenv from 'dotenv';
 import { adminRouter } from './admin';
 import { adminEmailCodeRouter } from './adminEmailCodeRouter';
 import { transferRouter } from './transfers';
-import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl } from './payments';
+import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl, hasUnresolvedRequestPayment } from './payments';
 import { platformRouter } from './platform';
 import { PayPhoneProvider } from './payphoneProvider';
 import { kushkiWebhookRouter } from './kushkiWebhook';
@@ -672,10 +672,12 @@ app.get('/api/requests/client', authenticateToken, async (req: AuthRequest, res:
       orderBy: { createdAt: 'desc' },
     });
     const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: req.user!.tenantId } });
+    const reviewed = await prisma.review.findMany({ where: { tenantId: req.user!.tenantId, clientId: req.user!.userId, requestId: { in: requests.map(request => request.id) } }, select: { requestId: true } });
+    const reviewedIds = new Set(reviewed.map(review => review.requestId));
     const purchaseIds = (await prisma.leadPurchase.findMany({ where: { requestId: { in: requests.map(item => item.id) } }, select: { id: true } })).map(item => item.id);
     const active = purchaseIds.length ? await prisma.payment.findMany({ where: { tenantId: req.user!.tenantId, OR: purchaseIds.map(id => ({ metadata: { path: ['leadPurchaseId'], equals: id } })), status: { in: ['created', 'awaiting_transfer', 'pending_provider', 'under_review', 'approved'] } }, select: { metadata: true, status: true, expiresAt: true } }) : [];
     const activeRequestIds = new Set(active.filter(payment => ['under_review', 'approved'].includes(payment.status) || !payment.expiresAt || payment.expiresAt > new Date()).map(payment => (payment.metadata as { requestId?: string }).requestId));
-    res.status(200).json(requests.map(request => ({ ...request, maxProfessionalsPerLead: purchaseLimitForRequest(request, settingsOf(tenant.settings)), canEdit: request.visibility === 'marketplace' && isOpenRequest(request.status) && request.purchaseCount === 0 && !activeRequestIds.has(request.id) })));
+    res.status(200).json(requests.map(request => ({ ...request, reviewed: reviewedIds.has(request.id), maxProfessionalsPerLead: purchaseLimitForRequest(request, settingsOf(tenant.settings)), canEdit: request.visibility === 'marketplace' && isOpenRequest(request.status) && request.purchaseCount === 0 && !activeRequestIds.has(request.id) })));
   } catch (error) {
     console.error('Error getting client requests:', error);
     res.status(500).json({ error: 'Error al obtener peticiones' });
@@ -1025,6 +1027,7 @@ app.get('/api/leads/unlocked', authenticateToken, async (req: AuthRequest, res: 
         payphoneTransactionId: p.payphoneTransactionId,
       },
       requestTitle: p.request.title,
+      description: p.request.description,
       clientName: p.request.contactName || p.request.client.fullName,
       clientPhone: p.request.contactPhone,
       clientEmail: p.request.contactEmail,
@@ -1174,6 +1177,7 @@ app.get('/api/quotes/request/:id', authenticateToken, async (req: AuthRequest, r
         status: q.status,
         createdAt: q.createdAt,
       },
+      professionalUserId: q.professional.userId,
       professionalName: q.professional.user.fullName,
       professionalRating: q.professional.rating,
       professionalReviewCount: q.professional.reviewCount,
@@ -1234,6 +1238,7 @@ app.post('/api/quotes/:id/accept', authenticateToken, async (req: AuthRequest, r
 
     const accepted = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${quote.requestId}`}))`;
+      if (await hasUnresolvedRequestPayment(tx, req.user!.tenantId, quote.requestId)) return false;
       const changed = await tx.serviceRequest.updateMany({ where: { id: quote.requestId, tenantId: req.user!.tenantId, status: { in: ['contact_limit_open', 'contact_limit_reached', 'quotes_received'] } }, data: { status: 'hired' } });
       if (!changed.count) return false;
       // Marcar la aceptada
@@ -1276,10 +1281,11 @@ app.post('/api/requests/:id/cancel', authenticateToken, async (req: AuthRequest,
 
     const updated = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${id}`}))`;
+      if (await hasUnresolvedRequestPayment(tx, req.user!.tenantId, id)) return null;
       const changed = await tx.serviceRequest.updateMany({ where: { id, tenantId: req.user!.tenantId, clientId: req.user!.userId, status: { in: [...OPEN_REQUEST_STATUSES] } }, data: { status: 'cancelled' } });
       return changed.count ? tx.serviceRequest.findUniqueOrThrow({ where: { id } }) : null;
     });
-    if (!updated) { res.status(409).json({ error: 'Solicitud no cancelable' }); return; }
+    if (!updated) { res.status(409).json({ error: 'Solicitud no cancelable. Puede haber un pago en curso; espera su resolución o contacta a soporte.' }); return; }
     
     res.status(200).json(updated);
   } catch (error) {
@@ -1388,20 +1394,23 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
     }
     const selectedCategories = categories === undefined ? undefined : canonicalServiceCategories(categories as string[]);
 
-    // Actualizar datos básicos del User
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(fullName !== undefined && { fullName }),
-        ...(phone !== undefined && { phone }),
-        ...(avatarUrl !== undefined && { avatarUrl }),
-      },
-    });
-
-    // Actualizar ProfessionalProfile
-    let updatedProfile = existingUser.professionalProfile;
-    if (updatedProfile) {
-      updatedProfile = await prisma.professionalProfile.update({
+    const { updatedUser, updatedProfile, criticalChange } = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`pro-profile:${req.user!.tenantId}:${userId}`}))`;
+      const currentProfile = await tx.professionalProfile.findUnique({ where: { userId } });
+      const criticalChange = Boolean(currentProfile?.verified && (
+        (selectedCategories !== undefined && JSON.stringify(selectedCategories.slice().sort()) !== JSON.stringify(canonicalServiceCategories(currentProfile.categories).sort()))
+        || (documentType !== undefined && (documentType || null) !== (currentProfile.documentType || null))
+        || (documentId !== undefined && (documentId || null) !== (currentProfile.documentId || null))
+      ));
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(fullName !== undefined && { fullName }),
+          ...(phone !== undefined && { phone }),
+          ...(avatarUrl !== undefined && { avatarUrl }),
+        },
+      });
+      const updatedProfile = currentProfile ? await tx.professionalProfile.update({
         where: { userId },
         data: {
           ...(businessName !== undefined && { businessName }),
@@ -1415,9 +1424,11 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
           ...(address !== undefined && { address }),
           ...(documentType !== undefined && { documentType }),
           ...(documentId !== undefined && { documentId }),
+          ...(criticalChange && { verified: false }),
         },
-      });
-    }
+      }) : null;
+      return { updatedUser, updatedProfile, criticalChange };
+    });
 
     const { password: _, verificationToken: __, mfaSecret: _mfaSecret, mfaPendingSecret: _mfaPending, mfaRecoveryHashes: _mfaRecovery, mfaLastCounter: _mfaCounter, ...safeUser } = updatedUser;
 
@@ -1425,6 +1436,7 @@ app.put('/api/profile', authenticateToken, async (req: AuthRequest, res: Respons
       success: true,
       user: safeUser,
       profile: updatedProfile,
+      requiresVerification: Boolean(criticalChange),
     });
   } catch (error) {
     console.error('Error in PUT /api/profile:', error);
@@ -1549,6 +1561,11 @@ app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, re
     }
 
     await prisma.$transaction(async tx => {
+      const requests = await tx.serviceRequest.findMany({ where: { clientId: user.id, tenantId: user.tenantId }, select: { id: true }, orderBy: { id: 'asc' } });
+      for (const request of requests) {
+        await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${user.tenantId}:${request.id}`}))`;
+        if (await hasUnresolvedRequestPayment(tx, user.tenantId, request.id)) throw new Error('PENDING_CLIENT_PAYMENTS');
+      }
       const changed = await tx.user.updateMany({
         where: { id: user.id, tenantId: user.tenantId, role: 'client', active: true },
         data: {
@@ -1577,6 +1594,7 @@ app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, re
     res.status(200).json({ success: true });
     void notifyAccountClosed(user.email, 'client').catch(error => console.error('No se pudo avisar del cierre de cuenta cliente:', error));
   } catch (error) {
+    if (error instanceof Error && error.message === 'PENDING_CLIENT_PAYMENTS') { res.status(409).json({ error: 'Hay pagos en curso en tus solicitudes. Espera su resolución o contacta a soporte antes de cerrar la cuenta.' }); return; }
     if (error instanceof Error && error.message === 'ACCOUNT_ALREADY_CLOSED') {
       res.status(409).json({ error: 'La cuenta ya fue eliminada.' }); return;
     }
@@ -1764,10 +1782,10 @@ app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<v
 app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id: professionalId } = req.params;
-    const { rating, comment } = req.body;
+    const { rating, comment, requestId } = req.body || {};
     const clientId = req.user!.userId;
 
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || typeof comment !== 'string' || !comment.trim() || comment.length > 2000) {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || typeof comment !== 'string' || !comment.trim() || comment.length > 2000 || typeof requestId !== 'string' || !requestId) {
       res.status(400).json({ error: 'Calificación o comentario inválidos.' });
       return;
     }
@@ -1790,10 +1808,17 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
       return;
     }
 
-    // 3. Crear la reseña
+    const completed = await prisma.serviceRequest.findFirst({ where: {
+      id: requestId, clientId, tenantId: req.user!.tenantId, status: 'completed',
+      quotes: { some: { tenantId: req.user!.tenantId, status: 'accepted', professional: { userId: professionalId } } },
+    } });
+    if (!completed) { res.status(403).json({ error: 'Solo puedes valorar un trabajo completado con este profesional.' }); return; }
+
+    // 3. Crear la reseña; el índice único por solicitud protege también de envíos simultáneos.
     const newReview = await prisma.$transaction(async (tx) => {
       const review = await tx.review.create({
         data: {
+          requestId,
           rating,
           comment: comment.trim(),
           clientId,
@@ -1831,6 +1856,7 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
 
     res.status(201).json(newReview);
   } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') { res.status(409).json({ error: 'Esta solicitud ya tiene una reseña.' }); return; }
     console.error('Error in POST /api/professionals/:id/reviews:', error);
     res.status(500).json({ error: 'Error al publicar la reseña.' });
   }
