@@ -143,7 +143,7 @@ export function SearchResultsPage() {
               // Extract info with fallbacks
               const title = pro.profile?.businessName || (pro.profile?.categories?.[0] ? `Servicios de ${serviceLabel(pro.profile.categories[0])}` : "Profesional en servicios");
               const bio = pro.profile?.bio || `Profesional verificado en ArtoCamello con ${pro.profile?.experienceYears || 0} años de experiencia.`;
-              const rating = pro.profile?.rating || 5.0;
+              const rating = pro.profile?.rating || 0;
               const reviews = pro.profile?.reviewCount || 0;
               const avatar = pro.avatarUrl || DEFAULT_AVATAR;
               const portfolioImg = pro.profile?.portfolioImages?.[0] || DEFAULT_PORTFOLIO;
@@ -207,9 +207,7 @@ export function SearchResultsPage() {
 
                     {/* Rating */}
                     <div className="flex items-center gap-1 mb-4">
-                      <Star className="w-4 h-4 fill-black text-black" />
-                      <span className="font-bold text-[#404145] text-sm">{rating.toFixed(1)}</span>
-                      <span className="text-gray-400 text-sm">({reviews})</span>
+                      {reviews ? <><Star className="w-4 h-4 fill-black text-black" /><span className="font-bold text-[#404145] text-sm">{rating.toFixed(1)}</span><span className="text-gray-500 text-sm">({reviews} verificadas)</span></> : <span className="text-gray-500 text-sm">Sin reseñas verificadas</span>}
                     </div>
 
                     {/* Price Footer */}

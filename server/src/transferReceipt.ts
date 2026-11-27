@@ -8,20 +8,14 @@ export function renderTransferReceipt(name: string, rows: string[][], logoSrc: s
   return `<div style="margin:0;background:#f3f4f6;padding:24px 12px;font-family:Arial,sans-serif;color:#101828"><div style="max-width:600px;margin:auto;background:#fff;border-radius:16px;overflow:hidden"><div style="background:#ffca0c;padding:20px 28px"><img src="${escapeHtml(logoSrc)}" alt="ArtoCamello" style="display:block;max-width:190px;height:auto"></div><div style="padding:28px"><p style="color:#15803d;font-weight:bold;margin:0">PAGO APROBADO</p><h1 style="font-size:26px;margin:12px 0">Recibo de pago</h1><p>Hola ${escapeHtml(name)}, tu transferencia fue validada y el contacto ya está disponible en Mis Contactos.</p><table role="presentation" style="width:100%;border-collapse:collapse;font-size:14px">${htmlRows}</table><p style="font-size:12px;color:#667085;margin-top:24px">Este recibo es una confirmación de pago, no una factura tributaria.</p></div></div></div>`;
 }
 
-/** A single delivery attempt per approved payment; delivery errors never undo allocation. */
-export async function sendTransferReceipt(db: PrismaClient, tenantId: string, paymentId: string): Promise<void> {
+/** Delivery is leased and retried by the notification outbox, not by this renderer. */
+export async function sendTransferReceipt(db: PrismaClient, tenantId: string, paymentId: string): Promise<boolean> {
   const payment = await db.payment.findFirst({
     where: { id: paymentId, tenantId, method: 'transfer', status: 'allocated' },
-    include: { payer: { select: { fullName: true, email: true, professionalProfile: { select: { businessName: true, city: true } } } }, allocations: { include: { leadPurchase: { include: { request: { select: { title: true } } } } } } },
+    include: { payer: { select: { fullName: true, email: true, active: true, professionalProfile: { select: { businessName: true, city: true } } } }, allocations: { include: { leadPurchase: { include: { request: { select: { title: true } } } } } } },
   });
   if (!payment || !payment.allocations.length || !payment.confirmedAt) throw new Error('Pago asignado sin datos para recibo');
-
-  try {
-    await db.paymentEvent.create({ data: { tenantId, paymentId, type: 'receipt_email_attempted', source: 'system', idempotencyKey: `receipt-email:${paymentId}`, payload: {} } });
-  } catch (error) {
-    if ((error as { code?: string }).code === 'P2002') return;
-    throw error;
-  }
+  if (!payment.payer.active) return false;
 
   const name = payment.payer.fullName;
   const title = payment.allocations[0].leadPurchase.request.title;
@@ -33,7 +27,7 @@ export async function sendTransferReceipt(db: PrismaClient, tenantId: string, pa
     ...(payment.payer.professionalProfile?.city ? [['Ciudad', payment.payer.professionalProfile.city]] : []),
     ['Referencia', payment.reference], ['Concepto', `Desbloqueo de contacto: ${title}`], ['Método de pago', 'Transferencia bancaria'], ['Fecha de aprobación', `${date} (hora de Ecuador)`], ['Total pagado', amount],
   ];
-  await createSmtpTransport().sendMail({
+  const result = await createSmtpTransport().sendMail({
     from: smtpFrom(),
     to: payment.payer.email,
     subject: 'Recibo de pago aprobado - ArtoCamello',
@@ -41,4 +35,6 @@ export async function sendTransferReceipt(db: PrismaClient, tenantId: string, pa
     html: renderTransferReceipt(name, rows, 'cid:artocamello-logo'),
     attachments: [{ filename: 'logoartocamello-white.png', path: path.join(__dirname, '..', 'assets', 'logoartocamello-white.png'), cid: 'artocamello-logo' }],
   });
+  if (!result.accepted?.includes(payment.payer.email)) throw new Error('SMTP did not accept receipt recipient');
+  return true;
 }

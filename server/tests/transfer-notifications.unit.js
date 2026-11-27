@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const nodemailer = require('nodemailer');
 
 const messages = [];
-nodemailer.createTransport = () => ({ sendMail: async message => { messages.push(message); } });
-const { notifyTransferReview } = require('../dist/transferNotifications.js');
+nodemailer.createTransport = () => ({ sendMail: async message => { messages.push(message); return { accepted: [message.to] }; } });
+const { notifyTransferReview, notifyTransferReviewRecipient } = require('../dist/transferNotifications.js');
 const { notifyRejectedTransfer } = require('../dist/userNotifications.js');
 
 test('avisa individualmente a los revisores activos del tenant sin adjuntar comprobantes', async () => {
@@ -38,5 +38,21 @@ test('avisa al pagador de un rechazo sin adjuntar información bancaria', async 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].to, 'payer@example.test');
   assert.match(messages[0].text, /example.test\/dashboard\/contacts/);
+  assert.equal(messages[0].attachments, undefined);
+});
+
+test('el aviso encolado revalida el permiso del revisor y no incluye comprobantes', async () => {
+  messages.length = 0;
+  let active = false;
+  const db = { tenantMembership: { findFirst: async args => {
+    assert.equal(args.where.tenantId, 'tenant-one');
+    assert.equal(args.where.userId, 'reviewer');
+    assert.equal(args.where.role.permissions.some.permission.code, 'payments.review');
+    return active ? { user: { email: 'reviewer@example.test' } } : null;
+  } } };
+  assert.equal(await notifyTransferReviewRecipient(db, 'tenant-one', 'reviewer', 'AC-REFERENCE'), false);
+  active = true;
+  assert.equal(await notifyTransferReviewRecipient(db, 'tenant-one', 'reviewer', 'AC-REFERENCE'), true);
+  assert.equal(messages.length, 1);
   assert.equal(messages[0].attachments, undefined);
 });

@@ -6,20 +6,20 @@ El cliente introduce un **presupuesto estimado para el trabajo**, no el importe 
 
 ## Eventos y destinatarios
 
-La entrega depende de SMTP. Los avisos de solicitudes, cotizaciones y cierres son **intentos posteriores al cambio de estado**: un fallo de correo no revierte la operación y no existe todavía cola de reintentos ni registro fiable de entrega. No incluir datos de contacto, dirección, descripción ni precio del trabajo en alertas que no requieren esos datos.
+La entrega depende de SMTP. Los avisos de solicitud directa, primera cotización, revisión de comprobante, transferencia rechazada y recibo de transferencia aprobada se encolan en `NotificationOutbox` en la misma transacción que su cambio de estado. Un worker reintenta fallos transitorios (hasta ocho intentos) y conserva los fallos agotados para investigación. El envío es **al menos una vez**, nunca exactamente una vez. El resto de correos continúa con entrega de mejor esfuerzo; un fallo no revierte la operación. No incluir datos de contacto, dirección, descripción ni precio del trabajo en alertas que no requieren esos datos.
 
 | Acción | Destinatario y estado | Criterio |
 | --- | --- | --- |
 | Registro y recuperación de contraseña | Titular; implementados | Verificación y seguridad; no sujetos a preferencias opcionales. |
-| Solicitud directa a un perfil | Profesional destinatario verificado; implementado, respeta `notif-new-jobs` | Una alerta por solicitud creada, sin datos privados del cliente ni acceso al contacto sin pago. |
+| Solicitud directa a un perfil | Profesional destinatario verificado; outbox con reintentos, respeta `notif-new-jobs` | Una alerta por solicitud creada, sin datos privados del cliente ni acceso al contacto sin pago. |
 | Publicación en mercado | No se envía correo masivo a profesionales | Requiere definir elegibilidad, frecuencia/resumen, límites de volumen y respeto de `notif-new-jobs` antes de habilitarlo. La publicación ya aparece en el panel. |
-| Primera cotización a una solicitud | Cliente; implementado, respeta `emailQuotes` | Sin contenido de la cotización en el mensaje. Editar una cotización no reenvía aviso. |
-| Comprobante recibido | Revisores autorizados de pagos; implementado | Aviso interno para revisión, sin adjuntar comprobante. |
-| Transferencia aprobada | Profesional pagador; recibo implementado | No depende de preferencias opcionales; contacto disponible en panel. |
+| Primera cotización a una solicitud | Cliente; outbox con reintentos, respeta `emailQuotes` | Sin contenido de la cotización en el mensaje. Editar una cotización no reenvía aviso. |
+| Comprobante recibido | Revisores autorizados de pagos; outbox con reintentos | Un aviso por revisor autorizado, sin adjuntar comprobante; revalida permiso al enviar. |
+| Transferencia aprobada | Profesional pagador; recibo en outbox con reintentos | No depende de preferencias opcionales; contacto disponible en panel. |
 | Cierre de cuenta | Titular de la cuenta cliente o profesional; implementado | Al correo anterior al cierre, sin contraseña ni datos de terceros; aviso de seguridad. |
-| Comprobante de transferencia rechazado | Profesional pagador; implementado | Sin comprobante ni datos bancarios en el mensaje; el motivo está en su panel. Envío de mejor esfuerzo. |
+| Comprobante de transferencia rechazado | Profesional pagador; outbox con reintentos | Sin comprobante ni datos bancarios en el mensaje; el motivo está en su panel. |
 | Pago no asignable o confirmado por otros métodos | Profesional afectado; **pendiente** | Requiere resolución operativa, notificación y, cuando corresponda, devolución; no prometer contacto automáticamente. |
 | Cotización aceptada/rechazada, cancelación o finalización de solicitud | Participantes afectados; **pendiente** | Valorar correo transaccional solo para quienes intervienen, con reglas anti-duplicados y estado persistido; notificar cancelación a compradores puede ser importante. |
 | Boletines y promociones | **No habilitados** | Registrar una preferencia no autoriza por sí solo el envío; definir base jurídica y mecanismo de baja antes de activarlos. |
 
-Pendiente antes de prometer entrega garantizada: cola durable, reintentos controlados, monitorización y pruebas de extremo a extremo con servidor SMTP de pruebas. Los ajustes `emailMessages` y `notif-client-msgs` están guardados, pero no existe todavía un flujo de chat que utilice esos avisos.
+Los fallos agotados aparecen en Administración → Correos fallidos (`settings.manage`), con reintento manual auditado; primero hay que corregir SMTP y asumir el riesgo de duplicados. Pendiente antes de prometer cobertura integral: migrar cierres de cuenta e invitaciones administrativas a la cola cuando se defina su tratamiento de privacidad y probar SMTP de extremo a extremo. Los correos con códigos y tokens de seguridad son independientes y deben respetar su vencimiento. Los ajustes `emailMessages` y `notif-client-msgs` están guardados, pero no existe todavía un flujo de chat que utilice esos avisos.

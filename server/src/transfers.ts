@@ -11,7 +11,7 @@ import { TransferProvider } from './paymentProvider';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
 import { hasServiceCategory } from './serviceCategories';
 import { canProfessionalAccessRequest, isPurchasableRequest, purchaseLimitForRequest } from './requestPolicy';
-import { notifyTransferReview } from './transferNotifications';
+import { enqueueNotification, processNotificationOutbox } from './notificationOutbox';
 
 type PayerRequest = Request & { payer?: { userId: string; tenantId: string } };
 const run = promisify(execFile);
@@ -171,12 +171,19 @@ export function transferRouter(db: PrismaClient, secret: string) {
       const file = await tx.storedFile.create({ data: { tenantId, storageKey, mimeType, size: bytes.length, checksum, createdBy: userId } });
       const submission = await tx.transferSubmission.create({ data: { paymentId: payment.id, bankName, declaredAmount, accountLast4, transferReference, transferredAt, proofFileId: file.id, submittedBy: userId } });
       await tx.paymentEvent.create({ data: { tenantId, paymentId: payment.id, type: 'proof_submitted', source: 'payer', idempotencyKey: `proof:${submission.id}`, payload: { checksum } } });
-      return submission;
+      const reviewers = await tx.tenantMembership.findMany({ where: {
+        tenantId, status: 'active', user: { active: true, emailVerified: true },
+        role: { permissions: { some: { permission: { code: 'payments.review' } } } },
+      }, select: { userId: true } });
+      for (const reviewer of reviewers) await enqueueNotification(tx, { tenantId, kind: 'transfer_review', subjectId: payment.id,
+        recipientUserId: reviewer.userId, hostname: req.hostname, eventKey: `transfer-review:${submission.id}:${reviewer.userId}` });
+      return { submission, reviewerIds: reviewers.map(reviewer => reviewer.userId) };
     }); } catch (error) { await unlink(filePath).catch(() => {}); throw error; }
     if (!result) { await unlink(filePath).catch(() => {}); res.status(409).json({ error: 'Estado cambió durante el envío' }); return; }
-    try { await notifyTransferReview(db, tenantId, payment.reference); }
-    catch (error) { console.error('No se pudo preparar el aviso de transferencia.', error); }
-    res.status(201).json({ submissionId: result.id, status: 'under_review' });
+    if (!result.reviewerIds.length) console.warn('No hay revisores activos para una transferencia pendiente.', { tenantId });
+    for (const reviewerId of result.reviewerIds) void processNotificationOutbox(db, `transfer-review:${result.submission.id}:${reviewerId}`)
+      .catch(error => console.error('No se pudo procesar el aviso de transferencia:', error));
+    res.status(201).json({ submissionId: result.submission.id, status: 'under_review' });
   }));
   router.get('/mine', wrap(async (req, res) => {
     const { userId, tenantId } = req.payer!;

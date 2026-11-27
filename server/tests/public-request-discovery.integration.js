@@ -40,11 +40,19 @@ test('public request discovery exposes only anonymized open marketplace requests
       { tenantId, clientId, visibility: 'direct', targetProfessionalUserId: professionalId, categorySlug: 'fontaneria', title: 'Solo para un profesional', description: 'Privado', city: 'Quito', location: 'Calle privada', contactPhone: '0999999999', contactEmail: `${clientId}@example.test`, estimatedBudget: 50, status: 'contact_limit_open' },
       { tenantId, clientId, visibility: 'marketplace', categorySlug: 'fontaneria', title: 'Solicitud cancelada', description: 'No debe aparecer', city: 'Quito', location: 'Calle privada', contactPhone: '0999999999', contactEmail: `${clientId}@example.test`, estimatedBudget: 50, status: 'cancelled' },
     ] });
+    const cityRequest = await prisma.serviceRequest.create({ data: {
+      tenantId, clientId, visibility: 'marketplace', categorySlug: 'fontaneria', title: 'Título privado', description: 'Descripción privada',
+      city: 'quevedo', location: 'Dirección privada 456', contactPhone: '0999999999', contactEmail: `${clientId}@example.test`, estimatedBudget: 75, status: 'matching',
+    } });
+    const addressRequest = await prisma.serviceRequest.create({ data: {
+      tenantId, clientId, visibility: 'marketplace', categorySlug: 'fontaneria', title: 'Título privado', description: 'Descripción privada',
+      city: 'Quevedo, calle privada 123', location: 'Dirección privada 789', contactPhone: '0999999999', contactEmail: `${clientId}@example.test`, estimatedBudget: 75, status: 'matching',
+    } });
 
     const listed = await request();
     assert.equal(listed.status, 200, JSON.stringify(listed.body));
-    assert.equal(listed.body.length, 1);
-    assert.deepEqual(listed.body[0], {
+    assert.equal(listed.body.length, 3);
+    assert.deepEqual(listed.body.find(item => item.id === publicRequest.id), {
       id: publicRequest.id,
       categorySlug: 'fontaneria',
       title: 'Servicio de fontaneria',
@@ -53,6 +61,13 @@ test('public request discovery exposes only anonymized open marketplace requests
       estimatedBudget: 80,
       createdAt: publicRequest.createdAt.toJSON(),
     });
+    assert.equal(listed.body.find(item => item.id === cityRequest.id).city, 'Quevedo');
+    assert.equal(listed.body.find(item => item.id === addressRequest.id).city, null);
+    for (const item of listed.body) {
+      for (const value of ['Descripción privada', 'Dirección privada', 'calle privada', '0999999999', `${clientId}@example.test`]) {
+        assert.equal(JSON.stringify(item).includes(value), false, value);
+      }
+    }
   } finally {
     await new Promise(resolve => server.close(resolve));
     await prisma.serviceRequest.deleteMany({ where: { tenantId } });

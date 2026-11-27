@@ -25,6 +25,7 @@ export interface PublicProfessional {
     rating: number;
     comment: string;
     createdAt: string;
+    verified: boolean;
     client: {
       fullName: string;
       avatarUrl: string | null;

@@ -94,6 +94,10 @@ export async function allocateLead(db: PrismaClient, paymentId: string, tenantId
     const updatedRequest = await tx.serviceRequest.findUniqueOrThrow({ where: { id: request.id } });
     if (updatedRequest.purchaseCount >= limit) await tx.serviceRequest.update({ where: { id: request.id }, data: { status: 'contact_limit_reached' } });
     await tx.paymentEvent.create({ data: { tenantId, paymentId, type: 'allocated', source, idempotencyKey: `allocated:${paymentId}`, payload: reviewNote ? { note: reviewNote } : {} } });
+    if (payment.method === 'transfer') await tx.notificationOutbox.create({ data: {
+      tenantId, eventKey: `transfer-receipt:${paymentId}`, kind: 'transfer_receipt', subjectId: paymentId,
+      recipientUserId: payment.payerUserId, hostname: 'localhost',
+    } });
     if (actorId && payment.method === 'transfer') await tx.transferSubmission.updateMany({ where: { paymentId, reviewedAt: null }, data: { reviewedBy: actorId, reviewedAt: new Date(), reviewNote } });
     if (actorId) await tx.auditLog.create({ data: {
       tenantId, actorId, action: 'payments.approve', entityType: 'Payment', entityId: paymentId,

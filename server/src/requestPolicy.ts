@@ -4,7 +4,14 @@ import type { TenantSettings } from './payments';
 
 export const OPEN_REQUEST_STATUSES = ['matching', 'contact_limit_open', 'contact_limit_reached', 'quotes_received'] as const;
 const SERVICE_CATEGORIES = new Set('albanileria jardineria mantenimiento pintura fontaneria electricidad limpieza carpinteria adiestrador-canino entrenador-personal mudanzas alquiler-furgonetas psicologia reformas cuidado-ninos cuidado-mayores cuidado-mascotas reparacion-electrodomesticos asesoria-fiscal servicios-legales fumigacion instalacion-pisos diseno-interiores cerrajeria climatizacion'.split(' '));
-const PUBLIC_CITIES = ['Ambato', 'Cuenca', 'Esmeraldas', 'Guayaquil', 'Ibarra', 'Latacunga', 'Loja', 'Machala', 'Manta', 'Portoviejo', 'Quito', 'Riobamba', 'Santo Domingo'].map(city => [city.toLocaleLowerCase('es-EC'), city] as const);
+// Only publish exact, well-known city names. Never extract a city from an address,
+// neighborhood, parish, or geocoder string (which could reveal a private location).
+const PUBLIC_CITIES = [
+  'Ambato', 'Azogues', 'Babahoyo', 'Cuenca', 'Daule', 'Durán', 'Esmeraldas',
+  'Guaranda', 'Guayaquil', 'Ibarra', 'Latacunga', 'Loja', 'Machala', 'Manta',
+  'Milagro', 'Otavalo', 'Portoviejo', 'Puyo', 'Quevedo', 'Quito', 'Riobamba',
+  'Salinas', 'Sangolquí', 'Santa Elena', 'Santo Domingo', 'Tena', 'Tulcán', 'Zamora',
+].map(city => [city.toLocaleLowerCase('es-EC'), city] as const);
 const publicCitiesByNormalizedName = new Map(PUBLIC_CITIES);
 export const isOpenRequest = (status: string) => OPEN_REQUEST_STATUSES.some(value => value === status);
 export const isPurchasableRequest = (status: string) => status === 'matching' || status === 'contact_limit_open';

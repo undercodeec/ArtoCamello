@@ -270,8 +270,8 @@ export function MyRequestsPage() {
                                         <p className="font-bold text-[#101828]">{professionalName}</p>
                                         <div className="flex items-center gap-1 text-sm text-gray-500">
                                           <Star className="w-3.5 h-3.5 fill-[#FFCA0C] text-[#FFCA0C]" />
-                                          <span className="font-medium">{professionalRating.toFixed(1)}</span>
-                                          <span>({professionalReviewCount} reseñas)</span>
+                                           <span className="font-medium">{professionalReviewCount ? professionalRating.toFixed(1) : '—'}</span>
+                                           <span>({professionalReviewCount} reseñas verificadas)</span>
                                         </div>
                                       </div>
                                     </div>

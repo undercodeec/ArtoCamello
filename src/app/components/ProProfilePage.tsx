@@ -289,8 +289,8 @@ export function ProProfilePage() {
                     <Star key={i} className={`w-4 h-4 ${i >= Math.round(rating) ? 'text-gray-300 fill-gray-300' : 'text-black fill-black'}`} />
                   ))}
                 </div>
-                <span className="font-bold text-[#FFCA0C] ml-1">{rating.toFixed(1)}</span>
-                <span className="text-[#62646A] hover:underline cursor-pointer">({reviews} reseñas)</span>
+                <span className="font-bold text-[#FFCA0C] ml-1">{reviews ? rating.toFixed(1) : '—'}</span>
+                <span className="text-[#62646A]">({reviews} reseñas verificadas)</span>
               </div>
             </div>
           </div>
@@ -324,6 +324,7 @@ export function ProProfilePage() {
                   <span className="font-medium flex-1 text-center flex items-center justify-center gap-1 line-clamp-1">
                     <Star className="w-3 h-3 fill-current text-[#FFCA0C]" /> {pro.reviews[currentClientIndex].rating} / 5
                   </span>
+                  {!pro.reviews[currentClientIndex].verified && <span className="text-xs text-amber-800">Contratación no verificada</span>}
                   <ChevronRight 
                     className={`w-4 h-4 cursor-pointer ${pro.reviews.length <= 1 ? 'opacity-50' : 'hover:text-[#404145]'}`} 
                     onClick={() => pro.reviews && pro.reviews.length > 1 && setCurrentClientIndex(prev => (prev + 1) % pro.reviews.length)}
@@ -433,14 +434,14 @@ export function ProProfilePage() {
             <div className="flex flex-col gap-8">
               {/* Reviews Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h3 className="text-[16px] font-bold text-[#404145]">{reviews} comentarios sobre este Servicio</h3>
+                <h3 className="text-[16px] font-bold text-[#404145]">{reviews} reseñas verificadas</h3>
                 <div className="flex items-center gap-1">
                   <div className="flex gap-0.5">
                     {[...Array(5)].map((_, i) => (
                       <Star key={i} className={`w-4 h-4 ${i >= Math.round(rating) ? 'text-gray-200 fill-gray-200' : 'text-black fill-black'}`} />
                     ))}
                   </div>
-                  <span className="font-bold text-[#404145] ml-2">{rating.toFixed(1)}</span>
+                  <span className="font-bold text-[#404145] ml-2">{reviews ? rating.toFixed(1) : '—'}</span>
                 </div>
               </div>
 
@@ -449,7 +450,7 @@ export function ProProfilePage() {
                 {/* Left side: Star distribution */}
                 <div className="flex-1 space-y-3">
                   {[5, 4, 3, 2, 1].map((stars) => {
-                    const count = pro.reviews?.filter(r => r.rating === stars).length || 0;
+                    const count = pro.reviews?.filter(r => r.verified && r.rating === stars).length || 0;
                     const percent = reviews > 0 ? (count / reviews) * 100 : 0;
                     return (
                       <div key={stars} className="flex items-center gap-4 text-[15px] font-semibold text-[#404145]">
@@ -468,7 +469,7 @@ export function ProProfilePage() {
           </div>
 
           <div className="mb-12 rounded-xl border border-gray-200 bg-white p-6">
-            <h3 className="text-xl font-bold text-[#404145]">Reseñas de trabajos completados</h3>
+            <h3 className="text-xl font-bold text-[#404145]">¿Completaste un trabajo con este profesional?</h3>
             <p className="mt-2 text-gray-600">Si contrataste a este profesional, podrás valorar el trabajo después de marcarlo como completado en Mis Solicitudes.</p>
             <button type="button" onClick={() => navigate('/mis-solicitudes')} className="mt-3 font-semibold text-blue-700 underline">Ir a Mis Solicitudes</button>
           </div>
@@ -493,7 +494,7 @@ export function ProProfilePage() {
                     <div>
                       <div className="font-bold text-[#404145] text-[16px]">{rev.client.fullName}</div>
                       <div className="flex items-center gap-1.5 text-sm text-[#62646A]">
-                        <span>Cliente Verificado</span>
+                        <span className={rev.verified ? 'text-green-800' : 'text-amber-800'}>{rev.verified ? 'Contratación verificada' : 'Contratación no verificada'}</span>
                       </div>
                     </div>
                   </div>
@@ -577,7 +578,7 @@ export function ProProfilePage() {
                   {/* Rating */}
                   <div className="flex items-center gap-1 mb-3">
                     <Star className="w-4 h-4 text-[#121212] fill-[#121212]" />
-                    <span className="font-bold text-[#404145] text-[15px]">{recPro.profile?.reviewCount ? recPro.profile.rating.toFixed(1) : 'Sin reseñas'}</span>
+                    <span className="font-bold text-[#404145] text-[15px]">{recPro.profile?.reviewCount ? recPro.profile.rating.toFixed(1) : 'Sin reseñas verificadas'}</span>
                     <span className="text-[#62646A] text-[15px]">({recPro.profile?.reviewCount || 0})</span>
                   </div>
                   

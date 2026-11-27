@@ -10,6 +10,7 @@ import { adminRouter } from './admin';
 import { adminEmailCodeRouter } from './adminEmailCodeRouter';
 import { transferRouter } from './transfers';
 import { allocateLead, leadAmount, settingsOf, PaymentConflict, expirePendingPayments, publicBaseUrl, hasUnresolvedRequestPayment } from './payments';
+import { verifiedReviewStats } from './professionalRatings';
 import { platformRouter } from './platform';
 import { PayPhoneProvider } from './payphoneProvider';
 import { kushkiWebhookRouter } from './kushkiWebhook';
@@ -19,7 +20,8 @@ import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isP
 import { CaptchaConfigurationError, verifyRecaptcha } from './captcha';
 import { createEmailVerificationToken, verifyEmailVerificationToken } from './emailVerification';
 import { escapeHtml } from './htmlEscape';
-import { notifyAccountClosed, notifyDirectRequest, notifyNewQuote } from './userNotifications';
+import { notifyAccountClosed } from './userNotifications';
+import { enqueueNotification, processNotificationOutbox } from './notificationOutbox';
 
 dotenv.config();
 
@@ -649,6 +651,7 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
         if (previous) return { previous };
       }
       const created = await tx.serviceRequest.create({ data: { ...fields, tenantId: req.user!.tenantId, clientId: req.user!.userId, status: 'contact_limit_open', idempotencyKey: key || null, payloadHash: key ? hash : null } });
+      if (body.visibility === 'direct') await enqueueNotification(tx, { tenantId: req.user!.tenantId, kind: 'direct_request', subjectId: created.id, recipientUserId: body.targetProfessionalUserId, hostname: req.hostname, eventKey: `direct-request:${created.id}` });
       return { created };
     });
     if ('previous' in result) {
@@ -656,8 +659,8 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
       res.status(200).json(result.previous); return;
     }
     res.status(201).json(result.created);
-    if (body.visibility === 'direct') void notifyDirectRequest(prisma, req.user!.tenantId, body.targetProfessionalUserId, req.hostname)
-      .catch(error => console.error('No se pudo avisar al profesional de la solicitud directa:', error));
+    if (body.visibility === 'direct') void processNotificationOutbox(prisma, `direct-request:${result.created!.id}`)
+      .catch(error => console.error('No se pudo procesar el aviso de solicitud directa:', error));
   } catch (error) {
     console.error('Error creating request:', error);
     res.status(500).json({ error: 'Error al crear la petición' });
@@ -1129,12 +1132,13 @@ app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Respons
         update: { message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
         create: { tenantId: req.user!.tenantId, requestId, professionalId: realProfId, message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
       });
+      if (!existingQuote) await enqueueNotification(tx, { tenantId: req.user!.tenantId, kind: 'new_quote', subjectId: quote.id, recipientUserId: request.clientId, hostname: req.hostname, eventKey: `new-quote:${quote.id}` });
       return { quote, clientId: request.clientId, isNew: !existingQuote };
     });
     if ('error' in result) { res.status(409).json({ error: result.error }); return; }
     res.status(200).json(result.quote);
-    if (result.isNew) void notifyNewQuote(prisma, req.user!.tenantId, result.clientId, req.hostname)
-      .catch(error => console.error('No se pudo avisar al cliente de la cotización:', error));
+    if (result.isNew) void processNotificationOutbox(prisma, `new-quote:${result.quote!.id}`)
+      .catch(error => console.error('No se pudo procesar el aviso de cotización:', error));
   } catch (error) {
     console.error('Error in POST /api/quotes:', error);
     res.status(500).json({ error: 'Error al enviar cotización.' });
@@ -1166,6 +1170,7 @@ app.get('/api/quotes/request/:id', authenticateToken, async (req: AuthRequest, r
       orderBy: { createdAt: 'asc' }
     });
 
+    const verifiedRatings = await verifiedReviewStats(prisma, req.user!.tenantId, quotes.map(q => q.professional.userId));
     const formatted = quotes.map(q => ({
       quote: {
         id: q.id,
@@ -1179,8 +1184,8 @@ app.get('/api/quotes/request/:id', authenticateToken, async (req: AuthRequest, r
       },
       professionalUserId: q.professional.userId,
       professionalName: q.professional.user.fullName,
-      professionalRating: q.professional.rating,
-      professionalReviewCount: q.professional.reviewCount,
+      professionalRating: verifiedRatings.get(q.professional.userId)?.rating ?? 0,
+      professionalReviewCount: verifiedRatings.get(q.professional.userId)?.reviewCount ?? 0,
       professionalAvatar: q.professional.user.avatarUrl,
     }));
 
@@ -1716,7 +1721,10 @@ app.get('/api/professionals', async (req: Request, res: Response): Promise<void>
         rating: true, reviewCount: true, verified: true, completedJobs: true,
       } } },
     });
-    const mappedPros = pros.map(({ professionalProfile, ...user }) => ({ ...user, profile: professionalProfile }));
+    const verifiedRatings = await verifiedReviewStats(prisma, tenantId, pros.map(pro => pro.id));
+    const mappedPros = pros.map(({ professionalProfile, ...user }) => ({
+      ...user, profile: professionalProfile ? { ...professionalProfile, rating: verifiedRatings.get(user.id)?.rating ?? 0, reviewCount: verifiedRatings.get(user.id)?.reviewCount ?? 0 } : null,
+    }));
 
     res.status(200).json(mappedPros);
   } catch (error) {
@@ -1745,7 +1753,7 @@ app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<v
         } },
         reviewsReceived: {
           where: { tenantId },
-          select: { id: true, rating: true, comment: true, createdAt: true,
+          select: { id: true, rating: true, comment: true, createdAt: true, requestId: true,
             client: {
               select: {
                 id: true,
@@ -1767,8 +1775,13 @@ app.get('/api/professionals/:id', async (req: Request, res: Response): Promise<v
       return;
     }
 
+    const verifiedRatings = await verifiedReviewStats(prisma, tenantId, [user.id]);
     const { professionalProfile, reviewsReceived, ...publicUser } = user;
-    res.status(200).json({ ...publicUser, profile: professionalProfile, reviews: reviewsReceived });
+    res.status(200).json({
+      ...publicUser,
+      profile: { ...professionalProfile, rating: verifiedRatings.get(user.id)?.rating ?? 0, reviewCount: verifiedRatings.get(user.id)?.reviewCount ?? 0 },
+      reviews: reviewsReceived.map(({ requestId, ...review }) => ({ ...review, verified: requestId !== null })),
+    });
   } catch (error) {
     console.error('Error in GET /api/professionals/:id:', error);
     res.status(500).json({ error: 'Error al cargar profesional' });
@@ -1837,7 +1850,7 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
 
       // 4. Actualizar agregados en el perfil del profesional
       const allReviews = await tx.review.findMany({
-        where: { professionalId, tenantId: req.user!.tenantId }
+        where: { professionalId, tenantId: req.user!.tenantId, requestId: { not: null } }
       });
 
       const count = allReviews.length;
@@ -2012,6 +2025,9 @@ if (require.main === module) {
   app.listen(port, () => console.log(`Backend Server running at http://localhost:${port}`));
   const expiryTimer = setInterval(() => expirePendingPayments(prisma).catch(error => console.error('Payment expiry failed', error)), 60000);
   expiryTimer.unref();
+  void processNotificationOutbox(prisma).catch(error => console.error('Notification outbox failed', error));
+  const mailTimer = setInterval(() => processNotificationOutbox(prisma).catch(error => console.error('Notification outbox failed', error)), 60_000);
+  mailTimer.unref();
   const throttleCleanupTimer = setInterval(() => Promise.all([
     pruneAuthAttempts(prisma),
     prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: new Date() } } }),

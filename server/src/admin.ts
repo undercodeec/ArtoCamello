@@ -3,14 +3,13 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { allocateLead, PaymentConflict, settingsOf } from './payments';
 import { canonicalServiceCategories } from './serviceCategories';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'crypto';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import { createSmtpTransport, smtpFrom } from './mail';
-import { notifyRejectedTransfer } from './userNotifications';
+import { enqueueNotification, processNotificationOutbox } from './notificationOutbox';
 import { verifyAdminEmailSession } from './adminMfa';
 import { KushkiCardProvider, kushkiConfigFor } from './kushkiProvider';
-import { sendTransferReceipt } from './transferReceipt';
 
 type Context = { tenantId: string; actorId: string; permissions: Set<string>; role: string };
 type AdminRequest = Request & { admin?: Context };
@@ -107,7 +106,7 @@ export function adminRouter(db: PrismaClient, secret: string) {
   router.get('/me', wrap(async (req, res) => { const c = req.admin!; res.json({ tenantId: c.tenantId, role: c.role, permissions: [...c.permissions] }); }));
   router.get('/dashboard', allow('dashboard.read'), wrap(async (req, res) => {
     const tenantId = req.admin!.tenantId;
-    const [pendingTransfers, approvedPayments, newUsers, unverifiedProfessionals, recentActivity, rejectedTransfers, approvedTransfers, expiredPayments, reviewedTransfers, unresolvedCardPayments, unresolvedProviderPayments] = await Promise.all([
+    const [pendingTransfers, approvedPayments, newUsers, unverifiedProfessionals, recentActivity, rejectedTransfers, approvedTransfers, expiredPayments, reviewedTransfers, unresolvedCardPayments, unresolvedProviderPayments, failedNotifications] = await Promise.all([
       db.payment.count({ where: { tenantId, method: 'transfer', status: 'under_review' } }),
       db.payment.count({ where: { tenantId, status: 'allocated' } }),
       db.user.count({ where: { tenantId, createdAt: { gte: new Date(Date.now() - 30 * 86400000) } } }),
@@ -119,9 +118,10 @@ export function adminRouter(db: PrismaClient, secret: string) {
       db.transferSubmission.findMany({ where: { payment: { tenantId }, reviewedAt: { not: null } }, select: { createdAt: true, reviewedAt: true }, orderBy: { createdAt: 'desc' }, take: 1000 }),
       db.payment.count({ where: { tenantId, method: 'card', status: 'approved' } }),
       db.payment.count({ where: { tenantId, method: { in: ['card', 'payphone'] }, status: 'approved' } }),
+      db.notificationOutbox.count({ where: { tenantId, status: 'failed' } }),
     ]);
     const averageReviewHours = reviewedTransfers.length ? reviewedTransfers.reduce((sum, transfer) => sum + (transfer.reviewedAt!.getTime() - transfer.createdAt.getTime()) / 3600000, 0) / reviewedTransfers.length : null;
-    res.json({ pendingTransfers, approvedPayments, newUsers, unverifiedProfessionals, recentActivity, rejectedTransfers, approvedTransfers, expiredPayments, unresolvedCardPayments, unresolvedProviderPayments, rejectionRate: rejectedTransfers + approvedTransfers ? rejectedTransfers / (rejectedTransfers + approvedTransfers) : null, averageReviewHours });
+    res.json({ pendingTransfers, approvedPayments, newUsers, unverifiedProfessionals, recentActivity, rejectedTransfers, approvedTransfers, expiredPayments, unresolvedCardPayments, unresolvedProviderPayments, failedNotifications, rejectionRate: rejectedTransfers + approvedTransfers ? rejectedTransfers / (rejectedTransfers + approvedTransfers) : null, averageReviewHours });
   }));
   const paymentWhere = (req: AdminRequest): Prisma.PaymentWhereInput => {
     const q = req.query;
@@ -152,6 +152,59 @@ export function adminRouter(db: PrismaClient, secret: string) {
     const where = paymentWhere(req);
     const [items, total] = await Promise.all([db.payment.findMany({ where, ...page(req), orderBy: { createdAt: 'desc' }, include: { payer: { select: { id: true, fullName: true, email: true } } } }), db.payment.count({ where })]);
     res.json({ items, total });
+  }));
+  // A confirmed payment without an allocation remains a financial case, never an automatic refund.
+  router.get('/payments/unresolved', allow('payments.read'), wrap(async (req, res) => {
+    const where: Prisma.PaymentWhereInput = { tenantId: req.admin!.tenantId, status: 'approved', allocations: { none: {} } };
+    const [items, total] = await Promise.all([
+      db.payment.findMany({ where, ...page(req), orderBy: { createdAt: 'asc' }, select: {
+        id: true, reference: true, amount: true, currency: true, method: true, createdAt: true,
+        payer: { select: { fullName: true } },
+        events: { where: { type: 'manual_case_note' }, orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+      } }),
+      db.payment.count({ where }),
+    ]);
+    res.json({ items, total });
+  }));
+  router.get('/notifications/failed', allow('settings.manage'), wrap(async (req, res) => {
+    const where = { tenantId: req.admin!.tenantId, status: 'failed' };
+    const [items, total] = await Promise.all([
+      db.notificationOutbox.findMany({ where, ...page(req), orderBy: { createdAt: 'asc' }, select: { id: true, kind: true, attempts: true, createdAt: true } }),
+      db.notificationOutbox.count({ where }),
+    ]);
+    res.json({ items, total });
+  }));
+  router.post('/notifications/failed/:id/retry', allow('settings.manage'), wrap(async (req, res) => {
+    const c = req.admin!;
+    const eventKey = await db.$transaction(async tx => {
+      const item = await tx.notificationOutbox.findFirst({ where: { id: req.params.id, tenantId: c.tenantId, status: 'failed' }, select: { id: true, eventKey: true } });
+      if (!item) return null;
+      const changed = await tx.notificationOutbox.updateMany({ where: { id: item.id, tenantId: c.tenantId, status: 'failed' }, data: { status: 'pending', attempts: 0, nextAttemptAt: new Date(), lockedUntil: null } });
+      if (!changed.count) return null;
+      await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'notifications.retry', entityType: 'NotificationOutbox', entityId: item.id, ip: req.ip } });
+      return item.eventKey;
+    });
+    if (!eventKey) { res.status(409).json({ error: 'El aviso ya no está en la lista de fallidos' }); return; }
+    res.status(202).json({ queued: true });
+    void processNotificationOutbox(db, eventKey).catch(error => console.error('Notification retry failed', error));
+  }));
+  router.post('/payments/unresolved/:id/notes', allow('payments.review'), wrap(async (req, res) => {
+    const note = req.body?.note;
+    if (typeof note !== 'string' || note.trim().length < 10 || note.trim().length > 1000) { res.status(400).json({ error: 'Registra una nota de seguimiento de 10 a 1000 caracteres' }); return; }
+    const c = req.admin!;
+    const event = await db.$transaction(async tx => {
+      const payment = await tx.payment.findFirst({ where: { id: req.params.id, tenantId: c.tenantId, status: 'approved', allocations: { none: {} } }, select: { id: true, status: true } });
+      if (!payment) return null;
+      // Lock the payment row so a concurrent allocation cannot silently close the case.
+      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${payment.id} AND "tenantId" = ${c.tenantId} FOR UPDATE`;
+      const current = await tx.payment.findFirst({ where: { id: payment.id, tenantId: c.tenantId, status: 'approved', allocations: { none: {} } }, select: { id: true } });
+      if (!current) return null;
+      const created = await tx.paymentEvent.create({ data: { tenantId: c.tenantId, paymentId: payment.id, type: 'manual_case_note', source: 'admin', idempotencyKey: `case-note:${randomUUID()}`, payload: { note: note.trim(), actorId: c.actorId } } });
+      await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'payments.case.note', entityType: 'Payment', entityId: payment.id, after: { eventId: created.id }, ip: req.ip } });
+      return created;
+    });
+    if (!event) { res.status(409).json({ error: 'El pago ya no está confirmado y sin asignación' }); return; }
+    res.status(201).json({ id: event.id, createdAt: event.createdAt });
   }));
   router.get('/payments/export.csv', allow('payments.export'), wrap(async (req, res) => {
     const rows = await db.payment.findMany({ where: paymentWhere(req), orderBy: { createdAt: 'desc' }, take: 10000 });
@@ -202,10 +255,10 @@ export function adminRouter(db: PrismaClient, secret: string) {
     if (note.length < 5) { res.status(400).json({ error: 'Indica una nota de revisión de al menos 5 caracteres' }); return; }
     try {
       const updated = await allocateLead(db, p.id, c.tenantId, 'admin', c.actorId, note);
-      let receiptEmailFailed = false;
-      try { await sendTransferReceipt(db, c.tenantId, p.id); }
-      catch (error) { receiptEmailFailed = true; console.error('No se pudo enviar el recibo de transferencia.', { paymentId: p.id, error }); }
-      res.json({ payment: updated, receiptEmailFailed });
+      try { await processNotificationOutbox(db, `transfer-receipt:${p.id}`); }
+      catch (error) { console.error('No se pudo procesar el recibo de transferencia.', { paymentId: p.id, error }); }
+      const receipt = await db.notificationOutbox.findUnique({ where: { eventKey: `transfer-receipt:${p.id}` }, select: { status: true } });
+      res.json({ payment: updated, receiptEmailPending: receipt?.status !== 'sent' });
     } catch (error) { if (error instanceof PaymentConflict || (error as { code?: string }).code === 'P2034') { const latest = await db.payment.findFirst({ where: { id: p.id, tenantId: c.tenantId } }); if (latest?.status === 'allocated') { res.json({ payment: latest, alreadyApproved: true }); return; } res.status(409).json({ error: error instanceof Error ? error.message : 'Conflicto concurrente' }); return; } throw error; }
   }));
   router.post('/payments/transfers/:id/reject', allow('payments.review'), wrap(async (req, res) => {
@@ -216,14 +269,14 @@ export function adminRouter(db: PrismaClient, secret: string) {
       const changed = await tx.payment.updateMany({ where: { id: req.params.id, tenantId: c.tenantId, method: 'transfer', status: 'under_review' }, data: { status: 'rejected' } });
       if (!changed.count) return null;
       await tx.transferSubmission.updateMany({ where: { paymentId: req.params.id, reviewedAt: null }, data: { reviewedBy: c.actorId, reviewedAt: new Date(), reviewNote: note } });
-      await tx.paymentEvent.create({ data: { tenantId: c.tenantId, paymentId: req.params.id, type: 'rejected', source: 'admin', idempotencyKey: `rejected:${req.params.id}:${Date.now()}`, payload: { note } } });
+      const event = await tx.paymentEvent.create({ data: { tenantId: c.tenantId, paymentId: req.params.id, type: 'rejected', source: 'admin', idempotencyKey: `rejected:${req.params.id}:${Date.now()}`, payload: { note } } });
+      await enqueueNotification(tx, { tenantId: c.tenantId, kind: 'transfer_rejected', subjectId: req.params.id, recipientUserId: (await tx.payment.findUniqueOrThrow({ where: { id: req.params.id }, select: { payerUserId: true } })).payerUserId, hostname: req.hostname, eventKey: `transfer-rejected:${event.id}` });
       await tx.auditLog.create({ data: { tenantId: c.tenantId, actorId: c.actorId, action: 'payments.reject', entityType: 'Payment', entityId: req.params.id, before: { status: 'under_review' }, after: { status: 'rejected', note }, ip: req.ip } });
-      return tx.payment.findUniqueOrThrow({ where: { id: req.params.id } });
+      return { payment: await tx.payment.findUniqueOrThrow({ where: { id: req.params.id } }), eventKey: `transfer-rejected:${event.id}` };
     });
     if (!updated) { res.status(409).json({ error: 'Transferencia no pendiente de revisión' }); return; }
-    res.json({ payment: updated });
-    void notifyRejectedTransfer(db, c.tenantId, updated.payerUserId, updated.reference, req.hostname)
-      .catch(error => console.error('No se pudo avisar al profesional del comprobante rechazado:', error));
+    res.json({ payment: updated.payment });
+    void processNotificationOutbox(db, updated.eventKey).catch(error => console.error('No se pudo procesar el aviso de comprobante rechazado:', error));
   }));
   router.get('/files/:id', allow('payments.read'), wrap(async (req, res) => {
     const c = req.admin!;

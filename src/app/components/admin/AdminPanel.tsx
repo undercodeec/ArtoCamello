@@ -15,6 +15,8 @@ const status: Record<string, string> = { awaiting_transfer: 'Esperando transfere
 const nav = [
   ['/', 'Inicio', 'dashboard.read'],
   ['/payments/transfers', 'Transferencias', 'payments.read'],
+  ['/payments/unresolved', 'Pagos por resolver', 'payments.read'],
+  ['/notifications/failed', 'Correos fallidos', 'settings.manage'],
   ['/payments', 'Todos los pagos', 'payments.read'],
   ['/users/clients', 'Clientes', 'users.read'],
   ['/users/professionals', 'Profesionales', 'users.read'],
@@ -25,7 +27,7 @@ const nav = [
   ['/audit', 'Auditoría', 'audit.read'],
 ];
 const navIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  '/': LayoutDashboard, '/payments/transfers': CreditCard, '/payments': ClipboardList,
+  '/': LayoutDashboard, '/payments/transfers': CreditCard, '/payments/unresolved': ClipboardList, '/payments': ClipboardList, '/notifications/failed': Bell,
   '/users/clients': UsersIcon, '/users/professionals': UserRound, '/users/pending': UsersIcon, '/access/admins': ShieldCheck,
   '/access/roles': ShieldCheck, '/settings': Settings2, '/audit': ClipboardList,
 };
@@ -56,7 +58,7 @@ export function AdminPanel() {
   if (!me) return <main className="p-8">Verificando acceso...</main>;
   const sub = pathname || '/';
   const permissions = new Set(me.permissions);
-  const paymentDetailMatch = sub === '/payments/transfers' ? null : /^\/payments\/([^/]+)$/.exec(sub);
+  const paymentDetailMatch = ['/payments/transfers', '/payments/unresolved'].includes(sub) ? null : /^\/payments\/([^/]+)$/.exec(sub);
   const selected = nav.find(([path]) => path === sub) || (paymentDetailMatch ? nav.find(([path]) => path === '/payments') : undefined);
   if ((selected && !permissions.has(selected[2])) || (paymentDetailMatch && !permissions.has('payments.read'))) return <main className="p-8">Permiso insuficiente</main>;
   const userName = getCurrentUser()?.fullName || 'Administrador';
@@ -76,6 +78,8 @@ export function AdminPanel() {
       <div className="p-4 md:p-8 max-w-[1500px] min-w-0 mx-auto">
       {sub === '/' && <Dashboard />}
       {sub === '/payments/transfers' && <Payments transfers permissions={permissions} />}
+      {sub === '/payments/unresolved' && <UnresolvedPayments />}
+      {sub === '/notifications/failed' && <FailedNotifications />}
       {sub === '/payments' && <Payments permissions={permissions} />}
       {paymentDetailMatch && <PaymentDetailPage id={decodeURIComponent(paymentDetailMatch[1])} canReview={permissions.has('payments.review')} />}
       {sub === '/users/clients' && <Users role="client" permissions={permissions} />}
@@ -155,10 +159,10 @@ function MfaGate({ mode, onReady }: { mode: 'setup' | 'verify'; onReady: () => v
 
 */
 function Dashboard() {
-  const { data, error, loading } = useData<{ pendingTransfers: number; approvedPayments: number; newUsers: number; unverifiedProfessionals: number; expiredPayments: number; unresolvedProviderPayments: number; rejectionRate: number | null; averageReviewHours: number | null; recentActivity: Array<{ id: string; action: string; createdAt: string }> }>('/dashboard');
+  const { data, error, loading } = useData<{ pendingTransfers: number; approvedPayments: number; newUsers: number; unverifiedProfessionals: number; expiredPayments: number; unresolvedProviderPayments: number; failedNotifications: number; rejectionRate: number | null; averageReviewHours: number | null; recentActivity: Array<{ id: string; action: string; createdAt: string }> }>('/dashboard');
   return <section><h1 className="text-3xl font-bold mb-6">Resumen</h1>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <>
     <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">{[['Transferencias por revisar', data.pendingTransfers], ['Pagos aprobados', data.approvedPayments], ['Usuarios nuevos (30 días)', data.newUsers], ['Profesionales por verificar', data.unverifiedProfessionals]].map(([label, value]) => <div key={label} className="bg-white rounded-xl p-5 border"><p className="text-gray-500 text-sm">{label}</p><strong className="text-3xl">{value}</strong></div>)}</div>
-    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">{[['Pagos vencidos', data.expiredPayments], ['Pagos de proveedor por resolver', data.unresolvedProviderPayments], ['Transferencias rechazadas', data.rejectionRate === null ? 'Sin datos' : `${(data.rejectionRate * 100).toFixed(1)}%`], ['Tiempo medio de revisión', data.averageReviewHours === null ? 'Sin datos' : `${data.averageReviewHours.toFixed(1)} h`]].map(([label, value]) => <div key={label} className="bg-white rounded-xl p-5 border"><p className="text-gray-500 text-sm">{label}</p><strong className="text-2xl">{value}</strong></div>)}</div>
+    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">{[['Pagos vencidos', data.expiredPayments], ['Pagos de proveedor por resolver', data.unresolvedProviderPayments], ['Correos con reintentos agotados', data.failedNotifications], ['Transferencias rechazadas', data.rejectionRate === null ? 'Sin datos' : `${(data.rejectionRate * 100).toFixed(1)}%`], ['Tiempo medio de revisión', data.averageReviewHours === null ? 'Sin datos' : `${data.averageReviewHours.toFixed(1)} h`]].map(([label, value]) => <div key={label} className="bg-white rounded-xl p-5 border"><p className="text-gray-500 text-sm">{label}</p><strong className="text-2xl">{value}</strong></div>)}</div>
     <div className="bg-white rounded-xl border p-5 mt-6"><h2 className="text-xl font-semibold mb-3">Actividad reciente</h2>{data.recentActivity.map(a => <p key={a.id} className="border-t py-2 text-sm">{a.action} · {date(a.createdAt)}</p>)}</div>
   </>}</section>;
 }
@@ -184,12 +188,53 @@ function Payments({ transfers = false, permissions }: { transfers?: boolean; per
   </section>;
 }
 
+function UnresolvedPayments() {
+  const navigate = useNavigate();
+  const [page, setPage] = useState(1);
+  const { data, error, loading, reload } = useData<List<Pick<Payment, 'id' | 'reference' | 'amount' | 'currency' | 'method' | 'createdAt'> & { payer: { fullName: string }; events: Array<{ createdAt: string }> }>>(`/payments/unresolved?page=${page}`);
+  return <section><h1 className="text-3xl font-bold mb-3">Pagos confirmados sin asignación</h1>
+    <p className="mb-5 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-4">Requieren conciliación individual. Una nota de seguimiento no confirma una devolución ni cambia el estado del pago.</p>
+    {error && <p role="alert" className="text-red-700">{error}</p>}
+    <button type="button" onClick={reload} className="mb-4 text-sm font-semibold underline">Actualizar casos</button>
+    {loading ? <p>Cargando...</p> : <div className="overflow-x-auto rounded-xl border bg-white"><table className="w-full text-sm"><thead><tr className="border-b bg-gray-50 text-left"><th className="p-3">Referencia</th><th>Pagador</th><th>Monto</th><th>Método</th><th>Desde</th><th>Último seguimiento</th><th></th></tr></thead><tbody>{data?.items.map(item => <tr key={item.id} className="border-t"><td className="p-3 font-mono">{item.reference}</td><td>{item.payer.fullName}</td><td>{money(item.amount, item.currency)}</td><td>{item.method}</td><td>{date(item.createdAt)}</td><td>{item.events[0] ? date(item.events[0].createdAt) : 'Sin seguimiento'}</td><td><button type="button" className="text-blue-700 underline" onClick={() => navigate(`/payments/${encodeURIComponent(item.id)}`)}>Ver caso</button></td></tr>)}</tbody></table>{!data?.items.length && <p className="p-5">No hay pagos confirmados sin asignación.</p>}</div>}
+    <Pager page={page} total={data?.total || 0} onPage={setPage} />
+  </section>;
+}
+
+function FailedNotifications() {
+  const [page, setPage] = useState(1);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { data, error, loading, reload } = useData<List<{ id: string; kind: string; attempts: number; createdAt: string }>>(`/notifications/failed?page=${page}`);
+  const retry = async (id: string) => {
+    if (!window.confirm('¿Reintentar este aviso? El correo podría haberse entregado ya y llegar duplicado.')) return;
+    setBusy(true); setMessage('');
+    try { await adminRequest(`/notifications/failed/${encodeURIComponent(id)}/retry`, { method: 'POST' }); setMessage('Aviso puesto en cola; comprueba el estado más tarde.'); reload(); }
+    catch (cause) { setMessage((cause as Error).message); } finally { setBusy(false); }
+  };
+  return <section><h1 className="text-3xl font-bold mb-3">Correos con reintentos agotados</h1><p className="mb-5 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-4">Comprueba el servicio SMTP antes de reintentar. Puede haber duplicados si el proveedor aceptó un envío anterior sin confirmarlo.</p>
+    {error && <p role="alert" className="text-red-700">{error}</p>}{message && <p role="status" className="mb-3">{message}</p>}
+    <button type="button" onClick={reload} className="mb-4 text-sm font-semibold underline">Actualizar</button>
+    {loading ? <p>Cargando...</p> : <div className="rounded-xl border bg-white overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Tipo de aviso</th><th>Intentos</th><th>Registrado</th><th></th></tr></thead><tbody>{data?.items.map(item => <tr className="border-t" key={item.id}><td className="p-3">{item.kind}</td><td>{item.attempts}</td><td>{date(item.createdAt)}</td><td><button type="button" disabled={busy} onClick={() => retry(item.id)} className="text-blue-700 underline disabled:opacity-50">Reintentar</button></td></tr>)}</tbody></table>{!data?.items.length && <p className="p-5">No hay correos fallidos.</p>}</div>}
+    <Pager page={page} total={data?.total || 0} onPage={setPage} />
+  </section>;
+}
+
 function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }) {
   const navigate = useNavigate();
   const { data, error, loading, reload } = useData<Payment>(`/payments/${id}`);
   const [note, setNote] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [caseNote, setCaseNote] = useState('');
+  const addCaseNote = async () => {
+    if (caseNote.trim().length < 10) { setMessage('Escribe al menos 10 caracteres.'); return; }
+    setBusy(true); setMessage('');
+    try {
+      await adminRequest(`/payments/unresolved/${id}/notes`, { method: 'POST', body: JSON.stringify({ note: caseNote.trim() }) });
+      setCaseNote(''); setMessage('Seguimiento registrado; el pago sigue pendiente de resolución.'); reload();
+    } catch (cause) { setMessage((cause as Error).message); } finally { setBusy(false); }
+  };
   const openProof = async (url: string) => {
     const tab = window.open('', '_blank');
     try {
@@ -206,8 +251,8 @@ function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }
     if (!window.confirm(confirmation)) return;
     setBusy(true); setMessage('');
     try {
-      const result = await adminRequest<{ receiptEmailFailed?: boolean }>(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) });
-      setMessage(decision === 'approve' ? (result.receiptEmailFailed ? 'Pago aprobado y contacto desbloqueado, pero no se pudo enviar el recibo por correo. Contacta a soporte.' : 'Pago aprobado y contacto desbloqueado.') : 'Comprobante rechazado.');
+      const result = await adminRequest<{ receiptEmailPending?: boolean }>(`/payments/transfers/${id}/${decision}`, { method: 'POST', body: JSON.stringify({ note }) });
+      setMessage(decision === 'approve' ? (result.receiptEmailPending ? 'Pago aprobado y contacto desbloqueado. El recibo queda pendiente de reintento por correo.' : 'Pago aprobado y contacto desbloqueado; recibo enviado.') : 'Comprobante rechazado.');
       reload();
     } catch (decisionError) { setMessage((decisionError as Error).message); } finally { setBusy(false); }
   };
@@ -240,7 +285,8 @@ function PaymentDetailPage({ id, canReview }: { id: string; canReview: boolean }
       {data.method === 'transfer' && !transferCount && <div className="bg-white border rounded-xl p-5 text-sm text-gray-600">El profesional todavía no ha enviado un comprobante.</div>}
       {canReview && data.method === 'card' && data.status !== 'allocated' && <button disabled={busy} className={button} onClick={reconcile}>Conciliar con Kushki</button>}
       {!!data.allocations?.length && <div className="bg-white border rounded-xl p-5 text-sm"><b>Asignaciones</b>{data.allocations.map(allocation => <p key={allocation.id} className="mt-2">{allocation.subjectId} · {money(allocation.amount, data.currency)}</p>)}</div>}
-      {!!data.events?.length && <div className="bg-white border rounded-xl p-5 text-sm"><b>Historial del pago</b>{data.events.map(event => <p key={event.id} className="border-t mt-2 pt-2">{date(event.createdAt)} · {event.source} · {event.type}</p>)}</div>}
+      {!!data.events?.length && <div className="bg-white border rounded-xl p-5 text-sm"><b>Historial del pago</b>{data.events.map(event => <p key={event.id} className="border-t mt-2 pt-2">{date(event.createdAt)} · {event.source} · {event.type}{event.type === 'manual_case_note' && event.payload?.note && <span className="block whitespace-pre-wrap">{event.payload.note}</span>}</p>)}</div>}
+      {data.status === 'approved' && !data.allocations?.length && <div className="bg-amber-50 border border-amber-300 rounded-xl p-5 text-sm space-y-3"><h2 className="font-bold">Caso por resolver</h2><p>Confirma el movimiento con el proveedor o banco. No marques una devolución solo por haber registrado esta nota. No incluyas datos bancarios o personales innecesarios.</p>{canReview && <><label className="block font-semibold">Nota de seguimiento<textarea className={`${input} block mt-1 w-full`} maxLength={1000} rows={3} value={caseNote} onChange={event => setCaseNote(event.target.value)} /></label><button type="button" className={button} disabled={busy || caseNote.trim().length < 10} onClick={addCaseNote}>Registrar seguimiento</button></>}</div>}
       {canReview && data.method === 'transfer' && data.status === 'under_review' && <div className="bg-white border rounded-xl p-5"><label className="block font-semibold mb-1">Nota de revisión (obligatoria)</label><textarea className={`${input} w-full`} rows={3} value={note} onChange={event => setNote(event.target.value)} /><div className="flex flex-wrap gap-2 mt-2"><button disabled={busy} className={button} onClick={() => decide('approve')}>Aprobar y desbloquear</button><button disabled={busy} className="bg-red-700 text-white px-4 py-2 rounded-lg disabled:opacity-50" onClick={() => decide('reject')}>Rechazar</button></div></div>}
       {message && <p className="font-medium">{message}</p>}
     </div>}

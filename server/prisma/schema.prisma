@@ -317,6 +317,7 @@ model Tenant {
   files                StoredFile[]
   allocations          PaymentAllocation[]
   events               PaymentEvent[]
+  notificationOutbox    NotificationOutbox[]
 }
 
 model AdminAccessCode {
@@ -517,4 +518,25 @@ model PaymentEvent {
   createdAt      DateTime @default(now())
 
   @@index([tenantId, paymentId, createdAt])
+}
+
+// Minimal references only; never persist rendered mail, access tokens or bank details.
+model NotificationOutbox {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  eventKey        String   @unique
+  kind            String
+  subjectId       String
+  recipientUserId String
+  hostname        String
+  status          String   @default("pending")
+  attempts        Int      @default(0)
+  nextAttemptAt   DateTime @default(now())
+  lockedUntil     DateTime?
+  sentAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, status])
 }
