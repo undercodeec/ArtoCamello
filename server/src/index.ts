@@ -19,6 +19,7 @@ import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isP
 import { CaptchaConfigurationError, verifyRecaptcha } from './captcha';
 import { createEmailVerificationToken, verifyEmailVerificationToken } from './emailVerification';
 import { escapeHtml } from './htmlEscape';
+import { notifyAccountClosed, notifyDirectRequest, notifyNewQuote } from './userNotifications';
 
 dotenv.config();
 
@@ -655,6 +656,8 @@ app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Respo
       res.status(200).json(result.previous); return;
     }
     res.status(201).json(result.created);
+    if (body.visibility === 'direct') void notifyDirectRequest(prisma, req.user!.tenantId, body.targetProfessionalUserId, req.hostname)
+      .catch(error => console.error('No se pudo avisar al profesional de la solicitud directa:', error));
   } catch (error) {
     console.error('Error creating request:', error);
     res.status(500).json({ error: 'Error al crear la petición' });
@@ -1123,10 +1126,12 @@ app.post('/api/quotes', authenticateToken, async (req: AuthRequest, res: Respons
         update: { message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
         create: { tenantId: req.user!.tenantId, requestId, professionalId: realProfId, message, estimatedPrice: Number(estimatedPrice), estimatedDays: estimatedDays == null ? null : Number(estimatedDays) },
       });
-      return { quote };
+      return { quote, clientId: request.clientId, isNew: !existingQuote };
     });
     if ('error' in result) { res.status(409).json({ error: result.error }); return; }
     res.status(200).json(result.quote);
+    if (result.isNew) void notifyNewQuote(prisma, req.user!.tenantId, result.clientId, req.hostname)
+      .catch(error => console.error('No se pudo avisar al cliente de la cotización:', error));
   } catch (error) {
     console.error('Error in POST /api/quotes:', error);
     res.status(500).json({ error: 'Error al enviar cotización.' });
@@ -1570,6 +1575,7 @@ app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, re
       });
     });
     res.status(200).json({ success: true });
+    void notifyAccountClosed(user.email, 'client').catch(error => console.error('No se pudo avisar del cierre de cuenta cliente:', error));
   } catch (error) {
     if (error instanceof Error && error.message === 'ACCOUNT_ALREADY_CLOSED') {
       res.status(409).json({ error: 'La cuenta ya fue eliminada.' }); return;
@@ -1625,6 +1631,7 @@ app.delete('/api/pro/account', authenticateToken, async (req: AuthRequest, res: 
         status: { in: [...OPEN_REQUEST_STATUSES] }, leadPurchases: { none: { status: 'paid' } } }, data: { status: 'cancelled' } });
     });
     res.json({ success: true });
+    void notifyAccountClosed(user.email, 'pro').catch(error => console.error('No se pudo avisar del cierre de cuenta profesional:', error));
   } catch (error) {
     if (error instanceof Error && error.message === 'PENDING_PAYMENTS') { res.status(409).json({ error: 'Tienes pagos pendientes. Resuélvelos antes de cerrar la cuenta.' }); return; }
     if (error instanceof Error && error.message === 'ACCOUNT_ALREADY_CLOSED') { res.status(409).json({ error: 'La cuenta ya fue cerrada.' }); return; }

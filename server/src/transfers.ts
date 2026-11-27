@@ -135,6 +135,7 @@ export function transferRouter(db: PrismaClient, secret: string) {
     const declaredAmountInput = req.body?.declaredAmount;
     if (typeof declaredAmountInput !== 'string' || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(declaredAmountInput) || new Prisma.Decimal(declaredAmountInput).lte(0)) { res.status(400).json({ error: 'Monto declarado inválido' }); return; }
     const declaredAmount = new Prisma.Decimal(declaredAmountInput);
+    if (!declaredAmount.equals(payment.amount)) { res.status(400).json({ error: 'El monto debe coincidir con el pago esperado. Si transferiste otro importe, contacta a soporte.' }); return; }
     const accountLast4 = req.body?.accountLast4 ? String(req.body.accountLast4).trim() : null;
     const transferredAt = new Date(req.body?.transferredAt);
     if (!bankName || !transferReference || Number.isNaN(transferredAt.getTime()) || transferredAt > new Date() || (accountLast4 && !/^\d{4}$/.test(accountLast4))) { res.status(400).json({ error: 'Datos de transferencia inválidos' }); return; }

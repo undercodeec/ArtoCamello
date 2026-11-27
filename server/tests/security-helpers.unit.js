@@ -3,6 +3,16 @@ const assert = require('node:assert/strict');
 const { createRecaptchaVerifier, CaptchaConfigurationError } = require('../dist/captcha');
 const { escapeHtml } = require('../dist/htmlEscape');
 const { createEmailVerificationToken, verifyEmailVerificationToken } = require('../dist/emailVerification');
+const { leadAmount, settingsOf } = require('../dist/payments');
+
+test('lead fee uses tenant percentage, minimum and cents rounding instead of a payer-entered amount', () => {
+  const defaults = settingsOf({});
+  assert.equal(defaults.leadFeeRate, 0.06);
+  assert.equal(leadAmount(20, defaults).toFixed(2), '3.00');
+  assert.equal(leadAmount(100, defaults).toFixed(2), '6.00');
+  assert.equal(leadAmount(101, defaults).toFixed(2), '6.06');
+  assert.equal(leadAmount(100, settingsOf({ leadFeeRate: 0.1, leadMinCostUSD: 4 })).toFixed(2), '10.00');
+});
 
 const validCaptcha = {
   success: true,

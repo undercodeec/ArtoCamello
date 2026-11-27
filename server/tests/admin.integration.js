@@ -196,10 +196,13 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     const proof = { bankName: 'Test bank', transferReference: 'REF-123', transferredAt: new Date(Date.now() - 60000).toISOString(), declaredAmount: '5.00', fileBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pKcAAAAASUVORK5CYII=' };
     assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', { ...proof, declaredAmount: undefined })).status, 400);
     assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', { ...proof, declaredAmount: 'invalid' })).status, 400);
-    assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', { ...proof, fileBase64: 'bad' })).status, 400);
-    assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', proof)).status, 201);
+    assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', proof)).status, 400);
+    assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', { ...proof, declaredAmount: '6.00', fileBase64: 'bad' })).status, 400);
+    assert.equal((await call(`/api/payments/${transfer.id}/transfer-proof`, ids.pro3, 'POST', { ...proof, declaredAmount: '6.00' })).status, 201);
     const transferDetail = await (await call(`/api/admin/payments/${transfer.id}`, ids.a)).json();
-    assert.equal(transferDetail.transfers[0].declaredAmount, '5');
+    assert.equal(transferDetail.transfers[0].declaredAmount, '6');
+    // Legacy mismatches remain blocked during administrative review.
+    await db.transferSubmission.update({ where: { id: transferDetail.transfers[0].id }, data: { declaredAmount: 5 } });
     assert.equal((await call(`/api/admin/payments/transfers/${transfer.id}/approve`, ids.a, 'POST', { note: 'Monto conciliado' })).status, 409);
     const proofUrl = transferDetail.transfers[0].proofUrl;
     assert.equal((await call(proofUrl, ids.a)).status, 200);

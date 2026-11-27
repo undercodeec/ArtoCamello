@@ -433,7 +433,7 @@ export function ClientProfilePage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-[#101828]">Nuevos presupuestos recibidos</h3>
-                      <p className="text-sm text-gray-500 mt-1">Preferencia para futuros avisos sobre presupuestos.</p>
+                      <p className="text-sm text-gray-500 mt-1">Recibe un aviso cuando llegue una nueva cotización. No incluye el contenido de la cotización.</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
                       <input 

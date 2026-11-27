@@ -684,7 +684,7 @@ export function ProProfileSettings() {
             </h3>
             <div className="space-y-4">
               {[
-                { id: 'notif-new-jobs',     label: 'Nuevos trabajos en mi zona',   desc: 'Preferencia para futuros avisos de nuevos trabajos.' },
+                { id: 'notif-new-jobs',     label: 'Nuevas solicitudes directas',   desc: 'Recibe un email si un cliente envía una solicitud directamente a tu perfil. No incluye el contacto del cliente.' },
                 { id: 'notif-client-msgs',  label: 'Mensajes de clientes',         desc: 'Preferencia para futuros avisos de mensajes.' },
                 { id: 'notif-newsletter',   label: 'Boletín y consejos',           desc: 'Preferencia para futuros boletines (no habilitados todavía).' },
               ].map((item, i) => (

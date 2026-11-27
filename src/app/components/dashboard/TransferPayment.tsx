@@ -23,7 +23,6 @@ export function TransferPaymentPage() {
   const [accountLast4, setAccountLast4] = useState('');
   const [transferReference, setTransferReference] = useState('');
   const [transferredAt, setTransferredAt] = useState('');
-  const [declaredAmount, setDeclaredAmount] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
@@ -41,10 +40,6 @@ export function TransferPaymentPage() {
     });
     return () => { active = false; };
   }, [requestId, paymentId]);
-
-  useEffect(() => {
-    if (payment) setDeclaredAmount(Number(payment.amount).toFixed(2));
-  }, [payment?.id]);
 
   const refresh = async () => {
     if (!payment) return;
@@ -84,7 +79,7 @@ export function TransferPaymentPage() {
         bankName: bankName.trim(), accountLast4: accountLast4.trim(),
         transferReference: transferReference.trim(),
         transferredAt: new Date(transferredAt).toISOString(),
-        declaredAmount, file,
+        declaredAmount: Number(payment.amount).toFixed(2), file,
       });
       await refresh();
     } catch (cause) {
@@ -133,7 +128,7 @@ export function TransferPaymentPage() {
           <label className="block text-sm font-medium">Banco de origen<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={bankName} onChange={event => setBankName(event.target.value)} /></label>
           <label className="block text-sm font-medium">Últimos 4 dígitos de la cuenta de origen (opcional)<input pattern="[0-9]{4}" maxLength={4} className="mt-1 block w-full rounded-lg border p-2" value={accountLast4} onChange={event => setAccountLast4(event.target.value)} /></label>
           <label className="block text-sm font-medium">Referencia emitida por el banco<input required maxLength={100} className="mt-1 block w-full rounded-lg border p-2" value={transferReference} onChange={event => setTransferReference(event.target.value)} /></label>
-          <label className="block text-sm font-medium">Monto transferido ({payment.currency})<input required type="number" min="0.01" step="0.01" className="mt-1 block w-full rounded-lg border p-2" value={declaredAmount} onChange={event => setDeclaredAmount(event.target.value)} /></label>
+          <div className="text-sm font-medium">Monto exacto a transferir ({payment.currency})<output className="mt-1 block w-full rounded-lg border bg-gray-50 p-2 font-semibold">{Number(payment.amount).toFixed(2)}</output><p className="mt-1 text-xs font-normal text-gray-600">El importe no se puede modificar. Si transferiste otro monto, contacta a soporte antes de enviar el comprobante.</p></div>
           <label className="block text-sm font-medium">Fecha y hora de la transferencia<input required type="datetime-local" className="mt-1 block w-full rounded-lg border p-2" value={transferredAt} onChange={event => setTransferredAt(event.target.value)} /></label>
           <label className="block text-sm font-medium">Comprobante PDF, JPG o PNG (máx. 5 MB)<input required type="file" accept="application/pdf,image/jpeg,image/png" className="mt-1 block w-full" onChange={event => setFile(event.target.files?.[0] || null)} /></label>
           <button type="submit" disabled={busy || !file} className="rounded-lg bg-[#101828] px-5 py-3 font-semibold text-white disabled:opacity-50">{busy ? 'Enviando...' : 'Enviar para revisión'}</button>

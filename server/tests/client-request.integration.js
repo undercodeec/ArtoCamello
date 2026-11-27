@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const jwt = require('jsonwebtoken');
+const sentMail = [];
+require('nodemailer').createTransport = () => ({ sendMail: async mail => { sentMail.push(mail); return { accepted: [mail.to] }; } });
 process.env.RECAPTCHA_SECRET_KEY = 'test-secret';
 const { app, prisma } = require('../dist/index.js');
 const { allocateLead } = require('../dist/payments.js');
@@ -77,6 +79,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(saved.contactName, payload.contactName);
     assert.equal(saved.visibility, 'marketplace');
     assert.equal(saved.city, payload.city);
+    assert.equal(sentMail.length, 0, 'Publicar en el mercado no envía correos masivos');
 
     const listed = await request('/api/requests/client', 'GET', clientToken);
     assert.equal(listed.status, 200);
@@ -147,6 +150,17 @@ test('a client request appears in client history and matching professional inbox
     captchaAccepted = true;
     const directId = JSON.parse(direct.body).id;
     assert.equal(JSON.parse(direct.body).categorySlug, 'fontaneria');
+    for (let attempt = 0; attempt < 50 && sentMail.length < 1; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(sentMail.length, 1);
+    assert.equal(sentMail[0].to, `${professionalId}@example.test`);
+    assert.ok(!sentMail[0].text.includes(payload.contactPhone));
+    assert.ok(!sentMail[0].text.includes('Calle 99'));
+    assert.ok(!sentMail[0].text.includes(payload.contactEmail));
+    await prisma.notificationPreference.create({ data: { tenantId, userId: professionalId, key: 'notif-new-jobs', enabled: false } });
+    const muted = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, categorySlug: 'Fontaneros', title: 'Otra solicitud directa', visibility: 'direct', targetProfessionalUserId: professionalId });
+    assert.equal(muted.status, 201, muted.body);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(sentMail.length, 1, 'Respeta la preferencia del profesional');
     const ownAvailable = JSON.parse((await request('/api/requests/available', 'GET', professionalToken)).body);
     const otherAvailable = JSON.parse((await request('/api/requests/available', 'GET', otherProfessionalToken)).body);
     assert.ok(ownAvailable.some(item => item.id === directId));
@@ -174,9 +188,21 @@ test('a client request appears in client history and matching professional inbox
     const quoteResponse = await request('/api/quotes', 'POST', professionalToken, { requestId: directId, message: 'Puedo hacerlo', estimatedPrice: 45 });
     assert.equal(quoteResponse.status, 200, quoteResponse.body);
     const quoteId = JSON.parse(quoteResponse.body).id;
+    const updatedQuote = await request('/api/quotes', 'POST', professionalToken, { requestId: directId, message: 'Ajuste de precio', estimatedPrice: 46 });
+    assert.equal(updatedQuote.status, 200, updatedQuote.body);
+    assert.equal(JSON.parse(updatedQuote.body).id, quoteId);
     assert.equal((await request(`/api/quotes/${quoteId}/accept`, 'POST', clientToken)).status, 200);
     assert.equal((await request(`/api/quotes/${quoteId}/accept`, 'POST', clientToken)).status, 409);
     assert.equal((await request('/api/quotes', 'POST', professionalToken, { requestId: directId, message: 'Precio nuevo', estimatedPrice: 46 })).status, 409);
+    for (let attempt = 0; attempt < 50 && sentMail.length < 2; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(sentMail.length, 2);
+    assert.equal(sentMail[1].to, `${clientId}@example.test`);
+    assert.ok(!sentMail[1].text.includes('Puedo hacerlo'));
+    await prisma.notificationPreference.create({ data: { tenantId, userId: clientId, key: 'emailQuotes', enabled: false } });
+    const quietQuote = await request('/api/quotes', 'POST', professionalToken, { requestId: saved.id, message: 'Otra cotización', estimatedPrice: 25 });
+    assert.equal(quietQuote.status, 200, quietQuote.body);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(sentMail.length, 2, 'Respeta la preferencia del cliente');
     assert.equal((await request(`/api/requests/${directId}/complete`, 'POST', clientToken)).status, 200);
     assert.equal((await request(`/api/requests/${directId}/cancel`, 'POST', clientToken)).status, 409);
 

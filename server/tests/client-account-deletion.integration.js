@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const sentMail = [];
+require('nodemailer').createTransport = () => ({ sendMail: async mail => { sentMail.push(mail); return { accepted: [mail.to] }; } });
 const { app, prisma } = require('../dist/index.js');
 
 test('client deletion needs password, redacts requests and invalidates old sessions', async () => {
@@ -73,6 +75,8 @@ test('client deletion needs password, redacts requests and invalidates old sessi
     assert.equal(closedService.location, '');
     assert.equal(await prisma.leadPurchase.count({ where: { requestId: service.id, status: 'paid' } }), 1);
     assert.equal((await call('/api/client/profile', 'GET', token(clientId))).status, 403);
+    assert.equal(sentMail.length, 1);
+    assert.equal(sentMail[0].to, email);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await prisma.leadPurchase.deleteMany({ where: { tenantId } });

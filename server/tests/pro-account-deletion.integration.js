@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const sentMail = [];
+require('nodemailer').createTransport = () => ({ sendMail: async mail => { sentMail.push(mail); return { accepted: [mail.to] }; } });
 const { app, prisma } = require('../dist/index.js');
 
 test('professional closure requires password, blocks pending payments and preserves paid lead history', async () => {
@@ -63,6 +65,8 @@ test('professional closure requires password, blocks pending payments and preser
     assert.equal(publicProfiles.status, 200);
     assert.equal(JSON.parse(publicProfiles.body).some(item => item.id === proId), false);
     assert.equal((await call('/api/profile', 'GET')).status, 403);
+    assert.equal(sentMail.length, 1);
+    assert.equal(sentMail[0].to, `${proId}@example.test`);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await prisma.payment.deleteMany({ where: { tenantId } });
