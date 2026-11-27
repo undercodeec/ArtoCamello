@@ -1,6 +1,6 @@
 # Política de privacidad y protección de datos personales
 
-**Versión de trabajo: 25 de noviembre de 2026.** Antes de utilizar esta política como versión definitiva, el responsable debe completar los datos indicados abajo y validar los tratamientos, proveedores y plazos con asesoría jurídica. La publicación de este texto no sustituye las medidas técnicas exigidas por la ley.
+**Versión de trabajo: 27 de noviembre de 2026.** Antes de utilizar esta política como versión definitiva, el responsable debe completar los datos indicados abajo y validar los tratamientos, proveedores y plazos con asesoría jurídica. La publicación de este texto no sustituye las medidas técnicas exigidas por la ley.
 
 ## 1. Responsable y contacto
 
@@ -41,13 +41,15 @@ También pueden tratar datos proveedores tecnológicos necesarios para alojamien
 
 Conservamos datos mientras la cuenta o la solicitud estén activas y mientras sean necesarios para prestar el servicio, cumplir obligaciones legales, auditar pagos o resolver reclamaciones. Una solicitud de eliminación puede estar limitada por obligaciones de conservación o derechos de terceros; en ese caso se restringe el uso de los datos conservados. **[PENDIENTE: aprobar y publicar plazos concretos por categoría: cuentas, solicitudes, reseñas, pagos, comprobantes privados, registros de acceso y auditoría, copias de seguridad.]** No se promete borrado inmediato de todas las copias.
 
-Actualmente, el cliente con contraseña local puede solicitar el cierre desde **Mi perfil**: se desactiva su cuenta, se eliminan sus datos de contacto y perfil y se cancelan y anonimizan sus solicitudes; ciertos registros de pagos o relaciones históricas pueden permanecer por obligaciones y trazabilidad. Para otros casos, incluidos profesionales, usa el canal de derechos de la sección 8. La desinstalación o el cierre de sesión no equivale a solicitar eliminación.
+Actualmente, el cliente con contraseña local puede solicitar el cierre desde **Mi perfil**: se desactiva su cuenta, se eliminan sus datos de contacto y perfil y se cancelan y anonimizan sus solicitudes; ciertos registros de pagos o relaciones históricas pueden permanecer por obligaciones y trazabilidad. El profesional con contraseña local puede cerrar su cuenta desde **Configuración** si no tiene pagos pendientes: se desactiva el acceso, se retira el perfil público y se vacían sus campos personales y reseñas; permanecen compras, pagos, cotizaciones y referencias históricas para trazabilidad y derechos de terceros. Para otras solicitudes de derechos sigue pendiente definir el canal indicado en la sección 8. La desinstalación o el cierre de sesión no equivale a solicitar eliminación.
 
 ## 6. Seguridad
 
 Aplicamos controles de acceso por rol, verificación de correo, protección de sesiones, límites contra intentos abusivos y almacenamiento privado de comprobantes. El acceso administrativo a evidencias requiere permisos y enlaces temporales. Ningún sistema es infalible: notificaremos incidentes a titulares y autoridades cuando lo exija la ley.
 
 ## 7. Cookies, tecnologías similares y terceros
+
+Los ajustes de notificaciones de clientes y profesionales se guardan en la cuenta y pueden cambiarse desde el panel. No constituyen por sí mismos un sistema de envíos comerciales: el boletín y la publicidad no están habilitados y las preferencias todavía deben integrarse con cualquier proceso futuro de envío antes de activarlo.
 
 La plataforma utiliza almacenamiento de sesión para autenticación y puede utilizar mecanismos técnicos necesarios para funcionar. **Google Analytics y Meta Pixel están deshabilitados en esta versión:** la aplicación no carga sus scripts ni les envía eventos. No existe un panel de preferencias para reactivarlos. El registro puede cargar Google reCAPTCHA y los perfiles pueden cargar mapas de Google; estos servicios pueden recibir datos técnicos y utilizar tecnologías propias. Puedes gestionar cookies mediante tu navegador, aunque eso no evita todas las comunicaciones técnicas. Los cambios anteriores no eliminan por sí solos cookies previamente guardadas en tu navegador.
 

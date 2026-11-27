@@ -14,7 +14,7 @@ import { platformRouter } from './platform';
 import { PayPhoneProvider } from './payphoneProvider';
 import { kushkiWebhookRouter } from './kushkiWebhook';
 import { clearAuthAttempt, consumeAuthAttempt, pruneAuthAttempts } from './authThrottle';
-import { canonicalServiceCategories, hasServiceCategory } from './serviceCategories';
+import { canonicalServiceCategories, canonicalServiceCategory, hasServiceCategory } from './serviceCategories';
 import { OPEN_REQUEST_STATUSES, canProfessionalAccessRequest, isOpenRequest, isPurchasableRequest, publicCity, purchaseLimitForRequest, toProfessionalPreview, validRequestFields } from './requestPolicy';
 import { CaptchaConfigurationError, verifyRecaptcha } from './captcha';
 import { createEmailVerificationToken, verifyEmailVerificationToken } from './emailVerification';
@@ -597,7 +597,10 @@ app.post('/api/auth/role', authenticateToken, async (req: AuthRequest, res: Resp
 app.post('/api/requests', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (req.user!.role !== 'client') { res.status(403).json({ error: 'Solo los clientes pueden crear solicitudes.' }); return; }
-    const body = req.body || {};
+    const body = { ...req.body };
+    if (body.visibility === 'direct' && typeof body.categorySlug === 'string') {
+      body.categorySlug = canonicalServiceCategory(body.categorySlug);
+    }
     if (!['direct', 'marketplace'].includes(body.visibility) || !validRequestFields(body)
       || (body.visibility === 'direct' ? typeof body.targetProfessionalUserId !== 'string' : body.targetProfessionalUserId != null)) {
       res.status(400).json({ error: 'Datos de solicitud inválidos' }); return;
@@ -1555,6 +1558,7 @@ app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, re
       await tx.clientProfile.deleteMany({ where: { userId: user.id, tenantId: user.tenantId } });
       await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
       await tx.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+      await tx.notificationPreference.deleteMany({ where: { userId: user.id } });
       await tx.review.deleteMany({ where: { clientId: user.id, tenantId: user.tenantId } });
       await tx.serviceRequest.updateMany({
         where: { clientId: user.id, tenantId: user.tenantId },
@@ -1572,6 +1576,60 @@ app.delete('/api/client/account', authenticateToken, async (req: AuthRequest, re
     }
     console.error('Error in DELETE /api/client/account:', error);
     res.status(500).json({ error: 'No se pudo eliminar la cuenta.' });
+  }
+});
+
+/** Closes a professional account without cascading away paid purchases, payments or quotes. */
+app.delete('/api/pro/account', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const password = req.body?.password;
+    if (typeof password !== 'string' || !password || password.length > 128 || req.body?.confirmation !== 'ELIMINAR') {
+      res.status(400).json({ error: 'Escribe ELIMINAR y tu contraseña actual para confirmar.' }); return;
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!user || user.role !== 'pro' || user.tenantId !== req.user!.tenantId) {
+      res.status(403).json({ error: 'Solo profesionales pueden cerrar su cuenta desde esta ruta.' }); return;
+    }
+    if (!user.password || user.authProvider !== 'local') {
+      res.status(409).json({ error: 'Establece una contraseña local mediante recuperación de contraseña antes de cerrar la cuenta.' }); return;
+    }
+    const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['delete-account', user.id, req.ip || 'unknown'], 5, 15 * 60000);
+    if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiados intentos.' }); return; }
+    if (!await bcrypt.compare(password, user.password)) {
+      res.status(401).json({ error: 'La contraseña actual no es correcta.' }); return;
+    }
+    await prisma.$transaction(async tx => {
+      // Serialize closure with payment creation and profile updates for this user.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
+      const pending = await tx.payment.count({ where: { tenantId: user.tenantId, payerUserId: user.id, status: { in: ['created', 'awaiting_transfer', 'under_review', 'approved', 'pending_provider'] } } });
+      if (pending) throw new Error('PENDING_PAYMENTS');
+      const changed = await tx.user.updateMany({
+        where: { id: user.id, tenantId: user.tenantId, role: 'pro', active: true },
+        data: { active: false, sessionVersion: { increment: 1 }, emailVerified: false,
+          email: `deleted-${user.id}@invalid.local`, fullName: 'Cuenta eliminada', phone: null,
+          password: null, avatarUrl: null, verificationToken: null,
+          mfaSecret: null, mfaPendingSecret: null, mfaRecoveryHashes: [], mfaLastCounter: -1,
+          mfaFailureCount: 0, mfaLockedUntil: null },
+      });
+      if (!changed.count) throw new Error('ACCOUNT_ALREADY_CLOSED');
+      await tx.professionalProfile.updateMany({ where: { userId: user.id, tenantId: user.tenantId },
+        data: { verified: false, businessName: null, bio: '', categories: [], serviceZones: [], skills: [],
+          city: null, address: null, documentType: null, documentId: null, portfolioImages: [],
+          experienceYears: 0, rating: 0, reviewCount: 0, completedJobs: 0 } });
+      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
+      await tx.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+      await tx.notificationPreference.deleteMany({ where: { userId: user.id } });
+      await tx.review.deleteMany({ where: { professionalId: user.id, tenantId: user.tenantId } });
+      // Cancel only unmatched direct requests; paid contacts remain available to the client for dispute resolution.
+      await tx.serviceRequest.updateMany({ where: { tenantId: user.tenantId, targetProfessionalUserId: user.id,
+        status: { in: [...OPEN_REQUEST_STATUSES] }, leadPurchases: { none: { status: 'paid' } } }, data: { status: 'cancelled' } });
+    });
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'PENDING_PAYMENTS') { res.status(409).json({ error: 'Tienes pagos pendientes. Resuélvelos antes de cerrar la cuenta.' }); return; }
+    if (error instanceof Error && error.message === 'ACCOUNT_ALREADY_CLOSED') { res.status(409).json({ error: 'La cuenta ya fue cerrada.' }); return; }
+    console.error('Error in DELETE /api/pro/account:', error);
+    res.status(500).json({ error: 'No se pudo cerrar la cuenta.' });
   }
 });
 
@@ -1775,22 +1833,39 @@ app.post('/api/professionals/:id/reviews', authenticateToken, async (req: AuthRe
 // RUTAS DE PREFERENCIAS DE NOTIFICACIONES
 // ====================================================================
 
-/**
- * POST /api/notifications/preferences
- * Recibe la preferencia de notificación y envía un correo de confirmación.
- * Body: { preference: string, enabled: boolean, label: string }
- */
+const notificationKeys = {
+  client: ['emailQuotes', 'emailMessages', 'emailPromos'],
+  pro: ['notif-new-jobs', 'notif-client-msgs', 'notif-newsletter'],
+};
+const defaultNotificationPreferences: Record<string, boolean> = {
+  emailQuotes: true, emailMessages: true, emailPromos: false,
+  'notif-new-jobs': true, 'notif-client-msgs': true, 'notif-newsletter': false,
+};
+
+app.get('/api/notifications/preferences', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user!.role !== 'client' && req.user!.role !== 'pro') { res.status(403).end(); return; }
+    const saved = await prisma.notificationPreference.findMany({ where: { tenantId: req.user!.tenantId, userId: req.user!.userId } });
+    const keys = notificationKeys[req.user!.role];
+    res.json(Object.fromEntries(keys.map(key => [key, saved.find(row => row.key === key)?.enabled ?? defaultNotificationPreferences[key]])));
+  } catch (error) {
+    console.error('Error reading notification preferences:', error);
+    res.status(500).json({ error: 'No se pudieron cargar las preferencias.' });
+  }
+});
+
+/** Saves notification choices. Delivery systems must check these choices before sending optional mail. */
 app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { preference, enabled, label } = req.body;
+    const { preference, enabled, label } = req.body || {};
 
-    if (!['emailQuotes', 'emailMessages', 'emailPromos', 'notif-new-jobs', 'notif-client-msgs', 'notif-newsletter'].includes(preference) || typeof enabled !== 'boolean' || typeof label !== 'string' || label.length > 100) {
+    if ((req.user!.role !== 'client' && req.user!.role !== 'pro') || !notificationKeys[req.user!.role].includes(preference) || typeof enabled !== 'boolean' || typeof label !== 'string' || label.length > 100) {
       res.status(400).json({ error: 'Datos de preferencia inválidos.' });
       return;
     }
 
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-    if (!user) {
+    if (!user || user.tenantId !== req.user!.tenantId || !user.active) {
       res.status(404).json({ error: 'Usuario no encontrado.' });
       return;
     }
@@ -1799,8 +1874,11 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const limit = await consumeAuthAttempt(prisma, JWT_SECRET, ['notification-email', req.user!.tenantId, req.user!.userId, ip], 10, 3600000);
     if (!limit.allowed) { res.setHeader('Retry-After', String(limit.retryAfterSeconds)).status(429).json({ error: 'Demasiadas solicitudes' }); return; }
+    await prisma.notificationPreference.upsert({ where: { userId_key: { userId: user.id, key: preference } },
+      create: { userId: user.id, tenantId: user.tenantId, key: preference, enabled }, update: { enabled } });
     const safeLabel = escapeHtml(label);
     const safeName = escapeHtml(user.fullName);
+    let confirmationSent = false;
     if (enabled) {
       const statusText = 'activada';
       const statusColor = '#16a34a';
@@ -1852,8 +1930,8 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
                 </div>
 
                 <p style="color: #9ca3af; font-size: 13px; text-align: center; line-height: 1.6;">
-                  Recibirás correos electrónicos según esta preferencia.<br/>
-                  Puedes cambiar esto en cualquier momento desde tu panel.
+                  La preferencia se guardó en tu cuenta.<br/>
+                  Puedes cambiarla en cualquier momento desde tu panel.
                 </p>
               </div>
 
@@ -1866,6 +1944,7 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
             </div>
           `,
         });
+        confirmationSent = true;
       } catch (emailErr) {
         console.error('Error enviando correo de notificación:', emailErr);
         // No fallar la request si el correo falla
@@ -1875,7 +1954,7 @@ app.post('/api/notifications/preferences', authenticateToken, async (req: AuthRe
     res.status(200).json({ 
       success: true, 
       message: enabled 
-        ? `Notificación "${label}" activada. Se envió un correo de confirmación.`
+        ? `Notificación "${label}" activada.${confirmationSent ? ' Se envió un correo de confirmación.' : ''}`
         : `Notificación "${label}" desactivada.`,
       preference,
       enabled,

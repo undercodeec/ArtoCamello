@@ -2,6 +2,8 @@
 
 Documento interno. Consulta realizada el **25 de noviembre de 2026**. Los textos de `POLITICA_DE_PRIVACIDAD.md` y `TERMINOS_DE_SERVICIO.md` son **borradores**, no sustituyen asesoramiento jurídico ni la implementación de controles de privacidad. Las páginas públicas incluyen estos borradores para revisión; no declarar conformidad legal hasta resolver lo siguiente.
 
+Control técnico posterior: cierre de cuenta profesional con contraseña local y sin pagos pendientes, con redacción de perfil y mantenimiento de pagos y cotizaciones; preferencias guardadas pero sin integración con envíos opcionales futuros. Faltan el canal operativo y seguimiento de derechos, plazos aprobados, eliminación de respaldos y validación jurídica. La migración `20261127000000_notification_preferences` debe aplicarse antes de usar las rutas nuevas.
+
 ## Fuentes oficiales consultadas
 
 - [SPDP: marco normativo](https://www.spdp.gob.ec/marco-normativo/): Constitución, Ley Orgánica de Protección de Datos Personales (LOPDP) y Reglamento General (Decreto 904, publicado el 13 de noviembre de 2023).

@@ -3,7 +3,8 @@ import {
   Camera, MapPin, Wrench, Image as ImageIcon, Bell, Lock,
   Save, CheckCircle, AlertCircle, Loader2, X, Plus, Phone, Mail, User
 } from 'lucide-react';
-import { getCurrentAuth } from '@/services/authService';
+import { getCurrentAuth, requestPasswordReset, logout } from '@/services/authService';
+import { useNavigate } from 'react-router';
 import { SERVICE_OPTIONS, serviceId } from '@/app/constants/serviceSearch';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
@@ -63,6 +64,7 @@ function fileToBase64(file: File): Promise<string> {
 
 export function ProProfileSettings() {
   const auth = getCurrentAuth();
+  const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'settings'>('profile');
   const [profile, setProfile] = useState<ProfileData>(EMPTY_PROFILE);
@@ -75,6 +77,11 @@ export function ProProfileSettings() {
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
+  const [preferences, setPreferences] = useState<Record<string, boolean> | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [accountProvider, setAccountProvider] = useState('local');
   
   const [newSkill, setNewSkill] = useState("");
 
@@ -92,6 +99,7 @@ export function ProProfileSettings() {
       .then((r) => r.json())
       .then((data) => {
         if (data.user) {
+          setAccountProvider(data.user.authProvider || 'local');
           setProfile({
             fullName:        data.user.fullName        || '',
             email:           data.user.email           || '',
@@ -113,7 +121,27 @@ export function ProProfileSettings() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+    fetch(`${API_URL}/notifications/preferences`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => { if (!response.ok) throw new Error('No se pudieron cargar las preferencias.'); return response.json(); })
+      .then(setPreferences).catch(() => showToast('error', 'No se pudieron cargar las preferencias.'));
   }, []);
+
+  const handleDeleteAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (deleting || deleteConfirmation !== 'ELIMINAR' || !deletePassword) return;
+    setDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/pro/account`, { method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('authToken')}` },
+        body: JSON.stringify({ password: deletePassword, confirmation: deleteConfirmation }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No se pudo cerrar la cuenta.');
+      logout();
+      navigate('/', { replace: true });
+    } catch (error) {
+      showToast('error', error instanceof Error ? error.message : 'No se pudo cerrar la cuenta.');
+    } finally { setDeleting(false); setDeletePassword(''); }
+  };
 
   const showToast = (type: ToastType, message: string) => {
     setToast({ type, message });
@@ -656,9 +684,9 @@ export function ProProfileSettings() {
             </h3>
             <div className="space-y-4">
               {[
-                { id: 'notif-new-jobs',     label: 'Nuevos trabajos en mi zona',   desc: 'Recibe un email cuando un cliente publique un trabajo que coincida con tus servicios.', defaultOn: true },
-                { id: 'notif-client-msgs',  label: 'Mensajes de clientes',         desc: 'Recibe una notificación cuando un cliente te escriba.', defaultOn: true },
-                { id: 'notif-newsletter',   label: 'Boletín y consejos',           desc: 'Consejos para mejorar tu perfil y conseguir más trabajo.', defaultOn: false },
+                { id: 'notif-new-jobs',     label: 'Nuevos trabajos en mi zona',   desc: 'Preferencia para futuros avisos de nuevos trabajos.' },
+                { id: 'notif-client-msgs',  label: 'Mensajes de clientes',         desc: 'Preferencia para futuros avisos de mensajes.' },
+                { id: 'notif-newsletter',   label: 'Boletín y consejos',           desc: 'Preferencia para futuros boletines (no habilitados todavía).' },
               ].map((item, i) => (
                 <div key={item.id} className={`flex items-center justify-between py-4 ${i < 2 ? 'border-b border-gray-100' : ''}`}>
                   <div>
@@ -670,7 +698,8 @@ export function ProProfileSettings() {
                       id={item.id} 
                       type="checkbox" 
                       className="sr-only peer" 
-                      defaultChecked={item.defaultOn}
+                      checked={preferences?.[item.id] ?? false}
+                      disabled={!preferences}
                       onChange={async (e) => {
                         const enabled = e.target.checked;
                         const token = sessionStorage.getItem('authToken');
@@ -683,11 +712,10 @@ export function ProProfileSettings() {
                           });
                           const data = await res.json();
                           if (!res.ok) throw new Error(data.error);
+                          setPreferences(previous => ({ ...previous, [item.id]: enabled }));
                           showToast('success', data.message || (enabled ? `"${item.label}" activada` : `"${item.label}" desactivada`));
                         } catch (err: any) {
                           showToast('error', err.message || 'Error al actualizar la preferencia.');
-                          // Revert the toggle on error
-                          e.target.checked = !enabled;
                         }
                       }}
                     />
@@ -696,6 +724,16 @@ export function ProProfileSettings() {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="bg-white border border-red-200 rounded-2xl p-6 shadow-sm">
+            <h3 className="font-bold text-lg text-red-800 mb-3">Cerrar mi cuenta profesional</h3>
+            <p className="text-sm text-gray-600 mb-4">El perfil dejará de ser público y se retirarán sus datos personales. Se conservan compras, pagos y cotizaciones históricas para trazabilidad; no se eliminan las copias de seguridad. Si tienes pagos pendientes, deberás resolverlos primero.</p>
+            {accountProvider !== 'local' ? <button type="button" onClick={async () => { try { showToast('success', await requestPasswordReset(profile.email)); } catch (error) { showToast('error', error instanceof Error ? error.message : 'No se pudo enviar el enlace.'); } }} className="text-sm font-semibold underline">Establecer contraseña por correo antes de cerrar la cuenta</button> :
+              <form onSubmit={handleDeleteAccount} className="space-y-3">
+                <label className="block text-sm font-medium">Escribe ELIMINAR<input type="text" autoComplete="off" value={deleteConfirmation} onChange={event => setDeleteConfirmation(event.target.value)} className="mt-1 block w-full border rounded-lg p-2" /></label>
+                <label className="block text-sm font-medium">Contraseña actual<input type="password" autoComplete="current-password" value={deletePassword} onChange={event => setDeletePassword(event.target.value)} className="mt-1 block w-full border rounded-lg p-2" /></label>
+                <button type="submit" disabled={deleting || deleteConfirmation !== 'ELIMINAR' || !deletePassword} className="bg-red-700 text-white rounded-lg px-4 py-2 disabled:opacity-50">{deleting ? 'Cerrando...' : 'Cerrar cuenta definitivamente'}</button>
+              </form>}
           </div>
 
           {/* Password */}

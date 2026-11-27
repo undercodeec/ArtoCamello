@@ -73,10 +73,30 @@ export function ClientProfilePage() {
           console.error('Error parsing addresses', e);
         }
       }
+      const preferencesResponse = await fetch(`${API_URL}/notifications/preferences`, { headers: { Authorization: `Bearer ${token}` } });
+      if (preferencesResponse.ok) setNotifications(await preferencesResponse.json());
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateNotification = async (key: 'emailQuotes' | 'emailMessages' | 'emailPromos', label: string) => {
+    const token = sessionStorage.getItem('authToken');
+    if (!token) return;
+    const enabled = !notifications[key];
+    setErrorMsg('');
+    try {
+      const res = await fetch(`${API_URL}/notifications/preferences`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ preference: key, enabled, label }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo guardar la preferencia.');
+      setNotifications(previous => ({ ...previous, [key]: enabled }));
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'No se pudo guardar la preferencia.');
     }
   };
 
@@ -407,20 +427,20 @@ export function ClientProfilePage() {
             {activeTab === 'notifications' && (
               <div className="animate-in fade-in duration-300">
                 <h2 className="text-2xl font-bold text-[#101828] mb-6">Notificaciones</h2>
-                <p className="text-gray-500 mb-8">Elige qué tipo de correos quieres recibir de ArtoCamello.</p>
+                <p className="text-gray-500 mb-8">Guarda tus preferencias para futuros avisos. Las comunicaciones de seguridad y pagos necesarios no dependen de estos ajustes.</p>
 
                 <div className="space-y-6 max-w-lg">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-[#101828]">Nuevos presupuestos recibidos</h3>
-                      <p className="text-sm text-gray-500 mt-1">Te avisaremos cuando un profesional responda a tu solicitud con un precio.</p>
+                      <p className="text-sm text-gray-500 mt-1">Preferencia para futuros avisos sobre presupuestos.</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
                       <input 
                         type="checkbox" 
                         className="sr-only peer"
                         checked={notifications.emailQuotes}
-                        onChange={() => setNotifications({...notifications, emailQuotes: !notifications.emailQuotes})}
+                        onChange={() => updateNotification('emailQuotes', 'Nuevos presupuestos recibidos')}
                       />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFCA0C]"></div>
                     </label>
@@ -431,14 +451,14 @@ export function ClientProfilePage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="font-bold text-[#101828]">Mensajes de chat</h3>
-                      <p className="text-sm text-gray-500 mt-1">Notificaciones cuando un profesional te escriba por el chat interno.</p>
+                      <p className="text-sm text-gray-500 mt-1">Preferencia para futuros avisos sobre mensajes.</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
                       <input 
                         type="checkbox" 
                         className="sr-only peer"
                         checked={notifications.emailMessages}
-                        onChange={() => setNotifications({...notifications, emailMessages: !notifications.emailMessages})}
+                        onChange={() => updateNotification('emailMessages', 'Mensajes de chat')}
                       />
                       <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFCA0C]"></div>
                     </label>

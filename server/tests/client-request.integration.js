@@ -142,10 +142,11 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(invalid.status, 400);
 
     captchaAccepted = false;
-    const direct = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, title: 'Mi dirección Calle 99', description: 'Llámame al 0999999999', visibility: 'direct', targetProfessionalUserId: professionalId });
+    const direct = await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, categorySlug: 'Fontaneros', title: 'Mi dirección Calle 99', description: 'Llámame al 0999999999', visibility: 'direct', targetProfessionalUserId: professionalId });
     assert.equal(direct.status, 201, direct.body);
     captchaAccepted = true;
     const directId = JSON.parse(direct.body).id;
+    assert.equal(JSON.parse(direct.body).categorySlug, 'fontaneria');
     const ownAvailable = JSON.parse((await request('/api/requests/available', 'GET', professionalToken)).body);
     const otherAvailable = JSON.parse((await request('/api/requests/available', 'GET', otherProfessionalToken)).body);
     assert.ok(ownAvailable.some(item => item.id === directId));
@@ -157,6 +158,7 @@ test('a client request appears in client history and matching professional inbox
     assert.equal((await request('/api/leads/pay', 'POST', otherProfessionalToken, { requestId: directId })).status, 403);
     assert.equal((await request('/api/payments/card-intents', 'POST', otherProfessionalToken, { requestId: directId }, { 'Idempotency-Key': crypto.randomUUID() })).status, 403);
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, categorySlug: 'categoria-falsa' })).status, 400);
+    assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, categorySlug: 'categoria-falsa', visibility: 'direct', targetProfessionalUserId: professionalId })).status, 400);
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, targetProfessionalUserId: professionalId })).status, 400);
     assert.equal((await request('/api/requests', 'POST', clientToken, { ...payload, captchaToken: undefined, visibility: 'direct', targetProfessionalUserId: 'missing-professional' })).status, 404);
     const directIntent = await request('/api/payments/transfer-intents', 'POST', professionalToken, { requestId: directId });

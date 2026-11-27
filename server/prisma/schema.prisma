@@ -69,6 +69,7 @@ model User {
   auditActions       AuditLog[]
   submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
   reviewedTransfers  TransferSubmission[] @relation("TransferReviewer")
+  notificationPreferences NotificationPreference[]
 
   @@index([tenantId, role, createdAt])
 }
@@ -107,6 +108,19 @@ model ClientProfile {
   preferredCategories String[]
 
   @@index([tenantId])
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  enabled   Boolean
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, key])
+  @@index([tenantId, userId])
 }
 
 model ProfessionalProfile {
