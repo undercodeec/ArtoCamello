@@ -11,16 +11,16 @@ export function ProFAQ() {
       answer: "El registro en ArtoCamello es totalmente gratuito para los profesionales. Puedes crear tu perfil, seleccionar los servicios que ofreces y las zonas en las que trabajas sin ningún coste."
     },
     {
-      question: "¿Qué son los créditos y para qué sirven?",
-      answer: "Los créditos son nuestra moneda virtual. Los utilizarás para desbloquear los datos de contacto de los clientes que solicitan presupuestos. Solo pagas por los contactos que realmente te interesan, tú decides cuándo y en qué invertir."
+       question: "¿Por qué se paga para acceder al contacto?",
+       answer: "El registro es gratis; cada oportunidad muestra su costo antes de pagar. El pago desbloquea los datos de contacto una vez validado, pero no garantiza respuesta del cliente ni contratación. Comprueba que puedes atender su ciudad y sector antes de comprar."
     },
     {
       question: "¿Cómo recibo los avisos de nuevos trabajos?",
-      answer: "Te enviaremos notificaciones por correo electrónico y/o WhatsApp cada vez que un cliente de tu zona solicite un servicio que coincida con tu perfil profesional. Así podrás ser el primero en contactarle."
+       answer: "Las solicitudes generales aparecen en tu bandeja cuando coinciden con tus servicios y la cobertura declarada. No se envía correo masivo ni WhatsApp por cada publicación. Las solicitudes directas pueden generar un aviso por correo según tus preferencias."
     },
     {
       question: "¿Cuántos profesionales pueden contactar a un mismo cliente?",
-      answer: "Para garantizar que los clientes no se saturen y que tú tengas oportunidades reales de conseguir el trabajo, un máximo de 4 profesionales pueden contactar con cada solicitud de presupuesto."
+       answer: "Cada solicitud general tiene un cupo configurable de contactos desbloqueados, visible antes del pago. El cupo no indica presupuestos enviados ni garantiza conseguir el trabajo. Las solicitudes directas están reservadas a un profesional."
     },
     {
       question: "¿Cómo cobro por mis servicios?",

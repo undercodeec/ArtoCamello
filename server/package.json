@@ -15,8 +15,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:reconcile": "ts-node prisma/reconcile.ts",
-    "test:integration": "pnpm run build && node --test tests/admin.integration.js tests/password-reset.integration.js tests/client-request.integration.js tests/public-request-discovery.integration.js tests/client-account-deletion.integration.js tests/pro-account-deletion.integration.js tests/email-verification.integration.js tests/notification-email.integration.js tests/notification-outbox.integration.js",
-    "test:security-unit": "pnpm run build && node --test tests/admin-code-guard.unit.js tests/security-helpers.unit.js tests/transfer-notifications.unit.js tests/transfer-receipt.unit.js tests/request-policy.unit.js"
+    "test:integration": "pnpm run build && node --test --test-concurrency=1 tests/admin.integration.js tests/password-reset.integration.js tests/client-request.integration.js tests/public-request-discovery.integration.js tests/client-account-deletion.integration.js tests/pro-account-deletion.integration.js tests/email-verification.integration.js tests/notification-email.integration.js tests/notification-outbox.integration.js tests/billing.integration.js",
+    "test:security-unit": "pnpm run build && node --test tests/admin-code-guard.unit.js tests/security-helpers.unit.js tests/transfer-notifications.unit.js tests/transfer-receipt.unit.js tests/request-policy.unit.js tests/request-coverage.unit.js tests/billing.unit.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.0",
@@ -25,7 +25,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "10.1.4"
+    "nodemailer": "10.1.4",
+    "pdfkit": "^0.21.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -33,6 +34,7 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.0.0",
+    "@types/pdfkit": "^0.17.7",
     "prisma": "^6.4.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.0"

@@ -641,7 +641,7 @@ export function ProProfileSettings() {
               <h3 className="font-bold text-[#101828] flex items-center gap-2 mb-4">
                 <MapPin className="w-5 h-5 text-blue-500" /> Zonas de trabajo
               </h3>
-              <p className="text-xs text-gray-400 mb-3">Solo verás solicitudes de las zonas que marques.</p>
+               <p className="text-xs text-gray-500 mb-3">Usamos estas zonas para excluir solicitudes de otras ciudades cuando sea posible. Las zonas por sector no verifican el barrio exacto; confirma la cobertura antes de pagar. Sin zonas o con ciudades no reconocidas pueden aparecer solicitudes de otras áreas.</p>
               <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
                 {AVAILABLE_ZONES.map((zone) => (
                   <label key={zone} className="flex items-center gap-3 p-2.5 hover:bg-gray-50 rounded-xl cursor-pointer transition-colors">

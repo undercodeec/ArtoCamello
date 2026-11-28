@@ -125,7 +125,7 @@ function InboxCard({ job, isLoading, error, onPay, onCard, transferAvailable, tr
       {/* Competition bar */}
       <div className="px-5 pb-4">
         <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-          <span>Profesionales interesados</span>
+           <span>Contactos desbloqueados</span>
           <span className="font-semibold text-[#101828]">
             {job.purchaseCount} / {maxProfessionals} cupos
           </span>
@@ -509,7 +509,7 @@ export function MyContacts() {
         <div>
           <h1 className="text-3xl font-bold text-[#101828]">Mis Contactos</h1>
           <p className="text-gray-500 mt-1">
-            Solicitudes de clientes que buscan profesionales en tu área.
+             Solicitudes de tu categoría y zonas declaradas; confirma que puedes atender el sector antes de pagar.
           </p>
         </div>
         {/* Search */}
@@ -534,7 +534,7 @@ export function MyContacts() {
           <p className="text-sm font-semibold text-blue-800">¿Cómo funciona?</p>
           <p className="text-sm text-blue-700 mt-0.5">
              Antes de pagar ves la categoría, ciudad si está disponible, urgencia y presupuesto estimado. La descripción, dirección y datos de contacto se revelan
-             cuando se valida el <strong>pago del costo indicado</strong> para ese contacto.
+              cuando se valida el <strong>pago del costo indicado</strong> para ese contacto. No se garantiza respuesta ni contratación: el cliente puede elegir a otro profesional. Confirma que puedes atender su zona antes de pagar.
           </p>
         </div>
       </div>

@@ -81,6 +81,26 @@ test('a client request appears in client history and matching professional inbox
     assert.equal(saved.city, payload.city);
     assert.equal(sentMail.length, 0, 'Publicar en el mercado no envía correos masivos');
 
+    const cityResponse = await request('/api/requests', 'POST', clientToken, { ...payload, city: 'Quito', title: 'Solicitud con ciudad reconocida' });
+    assert.equal(cityResponse.status, 201, cityResponse.body);
+    const cityRequestId = JSON.parse(cityResponse.body).id;
+    await prisma.professionalProfile.update({ where: { userId: otherProfessionalId }, data: { serviceZones: ['Guayaquil'] } });
+    const otherCityInbox = JSON.parse((await request('/api/requests/available', 'GET', otherProfessionalToken)).body);
+    assert.ok(!otherCityInbox.some(item => item.id === cityRequestId));
+    assert.equal((await request('/api/leads/pay', 'POST', otherProfessionalToken, { requestId: cityRequestId })).status, 403);
+    assert.equal((await request('/api/payments/transfer-intents', 'POST', otherProfessionalToken, { requestId: cityRequestId })).status, 403);
+    assert.equal((await request('/api/payments/card-intents', 'POST', otherProfessionalToken, { requestId: cityRequestId }, { 'Idempotency-Key': crypto.randomUUID() })).status, 403);
+    await prisma.professionalProfile.update({ where: { userId: otherProfessionalId }, data: { serviceZones: ['Quito - Norte'] } });
+    assert.ok(JSON.parse((await request('/api/requests/available', 'GET', otherProfessionalToken)).body).some(item => item.id === cityRequestId));
+    const cityIntent = await request('/api/payments/transfer-intents', 'POST', otherProfessionalToken, { requestId: cityRequestId });
+    assert.equal(cityIntent.status, 201, cityIntent.body);
+    const cityPaymentId = JSON.parse(cityIntent.body).payment.id;
+    await prisma.payment.update({ where: { id: cityPaymentId }, data: { status: 'under_review' } });
+    await prisma.professionalProfile.update({ where: { userId: otherProfessionalId }, data: { serviceZones: ['Guayaquil'] } });
+    await assert.rejects(allocateLead(prisma, cityPaymentId, tenantId, 'test-zone-changed'), /Solicitud no disponible/);
+    await prisma.professionalProfile.update({ where: { userId: otherProfessionalId }, data: { serviceZones: ['Quito'] } });
+    assert.equal((await allocateLead(prisma, cityPaymentId, tenantId, 'test-zone-restored')).status, 'allocated');
+
     const listed = await request('/api/requests/client', 'GET', clientToken);
     assert.equal(listed.status, 200);
     assert.ok(JSON.parse(listed.body).some(item => item.id === saved.id));

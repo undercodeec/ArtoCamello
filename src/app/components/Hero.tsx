@@ -81,7 +81,7 @@ export function Hero() {
             Encuentra a los mejores profesionales para tu hogar o negocio
           </h1>
           <p className="text-base lg:text-lg text-gray-800 mb-8 max-w-[650px] leading-relaxed font-medium">
-            Recibe presupuestos gratuitos de profesionales locales verificados para reformas, limpieza, reparaciones y mucho más.
+            Publica gratis tu necesidad de reformas, limpieza o reparaciones. Profesionales verificados pueden contactarte o enviarte propuestas, sin cantidad ni plazo garantizados.
           </p>
 
           {/* Search Bar */}

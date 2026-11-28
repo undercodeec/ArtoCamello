@@ -77,7 +77,7 @@ export async function allocateLead(db: PrismaClient, paymentId: string, tenantId
     const request = await tx.serviceRequest.findFirst({ where: { id: purchase.requestId, tenantId } });
     const professional = await tx.professionalProfile.findUnique({ where: { id: purchase.professionalId }, include: { user: true } });
     if (!request || !professional || !professional.user.active || !professional.user.emailVerified || !professional.verified
-      || !canProfessionalAccessRequest(request, professional.userId, professional.categories, tenantId)
+      || !canProfessionalAccessRequest(request, professional.userId, professional.categories, tenantId, professional.serviceZones)
       || !isPurchasableRequest(request.status)) throw new PaymentConflict('Solicitud no disponible');
     const limit = purchaseLimitForRequest(request, settingsOf(tenant.settings));
     const slot = await tx.serviceRequest.updateMany({
@@ -85,10 +85,15 @@ export async function allocateLead(db: PrismaClient, paymentId: string, tenantId
       data: { purchaseCount: { increment: 1 } },
     });
     if (slot.count !== 1) throw new PaymentConflict('Cupo de profesionales agotado');
+    const billing = await tx.billingProfile.findFirst({ where: { tenantId, userId: payment.payerUserId } });
     await tx.leadPurchase.update({ where: { id: purchase.id }, data: { status: 'paid', paidAt: new Date(), ...(payment.method === 'payphone' ? { payphoneClientTxId: payment.reference, payphoneTransactionId: payment.providerPaymentId } : {}) } });
     await tx.paymentAllocation.create({ data: {
       tenantId, paymentId, leadPurchaseId: purchase.id, subjectId: purchase.id,
       amount: payment.amount,
+      billingSnapshot: billing ? { idType: billing.idType, idNumber: billing.idNumber, legalName: billing.legalName,
+        address: billing.address, email: billing.email, phone: billing.phone } : {
+        legalName: professional.user.fullName, email: professional.user.email,
+      },
     }});
     await tx.payment.update({ where: { id: paymentId }, data: { status: 'allocated', confirmedAt: new Date() } });
     const updatedRequest = await tx.serviceRequest.findUniqueOrThrow({ where: { id: request.id } });

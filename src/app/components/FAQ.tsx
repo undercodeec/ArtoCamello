@@ -5,28 +5,28 @@ import { ChevronDown } from 'lucide-react';
 export function FAQ() {
   const faqs = [
     {
-      q: '¿Qué es el diseño y cómo funciona el uso de un freelancer?',
-      a: 'ArtoCamello es el mercado de servicios freelance más grande del mundo para empresas más ágiles. Los compradores que necesitan servicios profesionales pueden encontrar rápidamente profesionales freelance ofreciendo sus habilidades a precios accesibles.'
+       q: '¿Cómo funciona una solicitud de servicio?',
+       a: 'Publicas gratis una necesidad o solicitas directamente a un profesional. Los profesionales interesados pueden desbloquear tu contacto y enviarte una propuesta, sin cantidad ni plazo de respuesta garantizados.'
     },
     {
-      q: '¿Cómo puedo pagar por los servicios?',
-      a: 'Ofrecemos métodos de pago seguros, incluyendo tarjetas de crédito, PayPal y otros métodos locales según tu país.'
+       q: '¿Quién paga en la plataforma?',
+       a: 'Publicar una solicitud es gratis para el cliente. Los profesionales pagan el costo mostrado para desbloquear datos de contacto. El pago del trabajo se acuerda directamente entre cliente y profesional.'
     },
     {
-      q: '¿Cómo garantizan que obtenga el servicio?',
-      a: 'Tu pago está retenido en depósito de garantía hasta que estés 100% satisfecho con el trabajo completado.'
+       q: '¿Se garantizan presupuestos o la contratación?',
+       a: 'No. La cantidad de propuestas, el tiempo de respuesta y la contratación dependen de los profesionales y del acuerdo entre las partes. ArtoCamello no retiene el pago del trabajo en garantía.'
     },
     {
-      q: '¿En qué moneda es el pago?',
-      a: 'Puedes elegir pagar en tu moneda local o en las principales monedas internacionales soportadas por la plataforma.'
+       q: '¿En qué moneda se muestra el costo de un contacto?',
+       a: 'El costo para desbloquear un contacto se muestra en dólares estadounidenses (USD).'
     },
     {
-      q: '¿Qué incluye la opción de revisión?',
-      a: 'Las revisiones dependen del paquete del vendedor y aseguran que el resultado final cumpla con tus expectativas.'
+       q: '¿Cómo funcionan las reseñas?',
+       a: 'Las reseñas vinculadas a solicitudes completadas y cotizaciones aceptadas cuentan en el promedio verificado. Las reseñas históricas sin esa vinculación se muestran como contratación no verificada y no cuentan en ese promedio.'
     },
     {
       q: '¿Qué sucede si necesito comunicarme con un profesional?',
-      a: 'Puedes usar nuestro sistema de mensajería integrado para comunicarte de forma segura y directa con los vendedores antes y durante el pedido.'
+       a: 'Un profesional que desbloquea tu contacto puede comunicarse contigo por teléfono o correo. También puede enviarte una cotización en la plataforma; las conversaciones externas no se reflejan en el contador de cotizaciones.'
     }
   ];
 

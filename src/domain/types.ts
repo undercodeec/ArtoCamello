@@ -154,6 +154,8 @@ export interface PaymentHistoryItem {
   location: string;
   costUSD: number;
   payphoneTransactionId?: string;
+  reference?: string;
+  method?: 'transfer' | 'payphone' | 'card';
   requestId: string;
 }
 

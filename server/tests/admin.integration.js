@@ -83,6 +83,9 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     const roleA = await db.adminRole.create({ data: { tenantId: tenantA, code: 'reviewer', name: 'Reviewer', permissions: { create: [read, review, usersManage, adminsManage, usersRead, dashboardRead, auditRead, settingsManage].map(permission => ({ permissionId: permission.id })) } } });
     const roleB = await db.adminRole.create({ data: { tenantId: tenantB, code: 'reader', name: 'Reader', permissions: { create: [{ permissionId: read.id }] } } });
     await db.tenantMembership.createMany({ data: [{ tenantId: tenantA, userId: ids.a, roleId: roleA.id }, { tenantId: tenantB, userId: ids.b, roleId: roleB.id }] });
+    const reviewerEmails = await (await call('/api/admin/payments/reviewers', ids.a)).json();
+    assert.deepEqual(reviewerEmails.emails, [`${ids.a}@example.test`]);
+    assert.equal((await call('/api/admin/payments/reviewers', ids.b)).status, 403);
     const adminEmailSession = jwt.sign({ userId: ids.a, tenantId: tenantA, sessionVersion: 0 }, process.env.JWT_SECRET || 'super-secret-jwt-key-change-me', { audience: 'admin-email' });
     const clientUsersResponse = await call('/api/admin/users?role=client', ids.a, 'GET', undefined, undefined, { 'X-Admin-Email-Session': adminEmailSession });
     assert.equal(clientUsersResponse.status, 200);
@@ -178,6 +181,9 @@ test('tenant isolation, RBAC and idempotent lead allocation', async () => {
     assert.equal((await call(`/api/admin/payments/${payment.id}`, ids.b)).status, 404);
     assert.equal((await call(`/api/payments/${payment.id}`, ids.b)).status, 403);
     const clientDetail = await (await call(`/api/admin/users/${ids.client}`, ids.a)).json();
+    assert.equal(clientDetail.role, 'client');
+    assert.equal(clientDetail.emailVerified, true);
+    assert.ok(Array.isArray(clientDetail.serviceRequests));
     assert.deepEqual(clientDetail.payments, []);
     assert.deepEqual(clientDetail.purchases, []);
     const adminDetail = await (await call(`/api/admin/users/${ids.a}`, ids.a)).json();

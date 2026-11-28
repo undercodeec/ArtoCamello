@@ -7,22 +7,22 @@ export function ProHowItWorks() {
     {
       icon: UserPlus,
       title: "Crea una cuenta",
-      description: "En primer lugar, crea tu cuenta gratuita. En menos de 2 minutos puedes tener configurado tu perfil de ArtoCamello y empezar a conseguir trabajos y clientes."
+       description: "Crea tu cuenta gratuita y configura los servicios y las zonas que puedes atender. Tu perfil deberá verificarse antes de acceder a las solicitudes."
     },
     {
       icon: ShieldCheck,
-      title: "Consigue clientes verificados",
-      description: "Recibe peticiones de presupuesto de clientes de tu zona. Una vez publicado un trabajo, validamos y verificamos mediante distintos métodos el teléfono del cliente."
+       title: "Explora solicitudes disponibles",
+       description: "Consulta las oportunidades de tus categorías. Las zonas declaradas ayudan a excluir otras ciudades; confirma el sector exacto y la conveniencia del trabajo antes de pagar."
     },
     {
       icon: CreditCard,
       title: "Paga por los que interesan",
-      description: "Recarga créditos en tu billetera de ArtoCamello. Con los créditos podrás desbloquear el contacto del cliente y enviarle tu presupuesto directamente."
+       description: "Paga el costo indicado por el contacto que te interese. Tras validar el pago podrás comunicarte con el cliente y enviar una cotización; no se garantiza respuesta ni contratación."
     },
     {
       icon: HeadphonesIcon,
-      title: "Atención personalizada",
-      description: "Dispondrás de un asesor que te ayudará de forma personalizada a optimizar la captación de tus clientes en la plataforma."
+       title: "Propón tu servicio",
+       description: "Si el cliente está interesado, acuerda con él las condiciones del trabajo. El pago del servicio final se realiza directamente entre ambas partes."
     }
   ];
 

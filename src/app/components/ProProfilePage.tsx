@@ -189,7 +189,7 @@ export function ProProfilePage() {
       });
       setIsDrawerOpen(false);
       navigate('/mis-solicitudes');
-      toast.success('Solicitud enviada correctamente.');
+       toast.success('Solicitud enviada. El profesional podrá responder si está interesado; no hay un plazo garantizado.');
     } catch (cause) {
       setRequestError(cause instanceof Error ? cause.message : 'No se pudo enviar la solicitud. Intenta nuevamente.');
     } finally {
@@ -951,7 +951,7 @@ export function ProProfilePage() {
                     </div>
                   </div>
 
-                  <div className="pt-6 border-t border-gray-100">
+                   <div className="pt-6 border-t border-gray-100">
                       {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
                       <button 
                         onClick={() => {
@@ -1033,8 +1033,9 @@ export function ProProfilePage() {
                     </div>
                   </div>
 
-                  <div className="pt-6 border-t border-gray-100">
-                      {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
+                   <div className="pt-6 border-t border-gray-100">
+                       <p className="mb-3 text-sm text-gray-600">Esta solicitud va solo a este profesional. Podrá ver una vista previa y, si paga por desbloquear tu contacto, responderte dentro o fuera de la plataforma. No se garantiza respuesta ni plazo.</p>
+                       {requestError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{requestError}</p>}
                       <button 
                         type="button"
                         onClick={handleSubmitRequest}

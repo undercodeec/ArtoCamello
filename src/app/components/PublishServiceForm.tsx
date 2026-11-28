@@ -75,7 +75,7 @@ export function PublishServiceForm({ onPublished }: { onPublished: () => void | 
 
   return <section id="publicar-solicitud" aria-labelledby="publish-heading" className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
       <h2 id="publish-heading" className="text-2xl font-bold text-[#101828]">Publica el servicio que necesitas</h2>
-      <p className="mt-2 text-gray-600">Publicar es gratis. Los profesionales de la categoría elegida verán una vista previa sin tu dirección ni datos de contacto. Podrán contactarte tras desbloquearlos.</p>
+       <p className="mt-2 text-gray-600">Publicar es gratis. Los profesionales elegibles de la categoría verán una vista previa sin tu dirección ni datos de contacto. Podrán contactarte tras pagar por desbloquearlos; las conversaciones pueden ocurrir fuera de la plataforma. No se garantiza una cantidad de propuestas ni un plazo de respuesta.</p>
       <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Borrador guardado en esta sesión. Solo será visible para profesionales cuando pulses Publicar solicitud.</p>
       <form onSubmit={submit} className="mt-7 space-y-5">
         <div><label htmlFor="publish-categorySlug" className="mb-1 block text-sm font-semibold">Categoría</label>

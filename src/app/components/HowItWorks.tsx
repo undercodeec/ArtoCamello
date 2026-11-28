@@ -9,8 +9,8 @@ export function HowItWorks() {
       icon: MessageSquare,
     },
     {
-      title: 'Recibe hasta 4 presupuestos gratis',
-      description: 'Los profesionales interesados te enviarán sus presupuestos para que puedas comparar.',
+      title: 'Recibe propuestas si hay profesionales interesados',
+      description: 'Publicar es gratis. La cantidad de propuestas y el tiempo de respuesta no están garantizados.',
       icon: ClipboardList,
     },
     {

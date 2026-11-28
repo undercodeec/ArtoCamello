@@ -118,7 +118,7 @@ export function ExploreJobs() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-[#101828]">Mercado de Trabajos</h1>
-          <p className="text-gray-500 mt-1">Paga directamente para desbloquear el contacto del cliente.</p>
+          <p className="text-gray-500 mt-1">Pagas por acceder al contacto, no por un trabajo o una respuesta garantizados. Confirma que puedes atender la zona antes de pagar.</p>
         </div>
         {/* Info modelo de negocio */}
         <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -213,9 +213,9 @@ export function ExploreJobs() {
                   {/* Competencia */}
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm font-medium text-gray-700">Competencia:</span>
+                        <span className="text-sm font-medium text-gray-700">Contactos desbloqueados:</span>
                       <span className="text-sm font-bold text-[#101828]">
-                        {job.purchaseCount} de {maxProfessionals} presupuestos
+                         {job.purchaseCount} de {maxProfessionals} cupos
                       </span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
@@ -279,7 +279,7 @@ export function ExploreJobs() {
                       )}
                     </button>}{cardAvailable && <button disabled={isLoading} className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg disabled:opacity-50" onClick={() => handleCardUnlock(job.id)}>Pagar con tarjeta</button>}{transferAvailable && <button className="w-full border border-[#101828] text-[#101828] font-bold py-3 px-4 rounded-lg" onClick={() => { window.location.href = `/dashboard/transfer/${job.id}`; }}>Pagar por transferencia</button>}{!payphoneAvailable && !transferAvailable && !cardAvailable && <p className="text-sm text-gray-500">Pagos temporalmente no disponibles</p>}</div>
                   )}
-                  {transferAvailable && !already && <p className="mt-3 text-xs text-gray-600">El número del cliente se habilitará después de validar el pago.</p>}
+                   {!already && <p className="mt-3 text-xs text-gray-600">El pago desbloquea el contacto tras su validación; el cliente puede no responder o elegir a otro profesional. Verifica que puedes atender la ciudad y el sector antes de pagar.</p>}
                 </div>
               </div>
             );

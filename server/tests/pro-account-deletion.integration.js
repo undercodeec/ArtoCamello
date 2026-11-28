@@ -42,6 +42,8 @@ test('professional closure requires password, blocks pending payments and preser
     const unpaidService = await prisma.serviceRequest.create({ data: { tenantId, clientId, categorySlug: 'fontaneria', visibility: 'direct', targetProfessionalUserId: proId, title: 'Servicio nuevo', description: 'Descripción', location: 'Calle', contactPhone: '0992222222', contactEmail: 'cliente@example.test', status: 'contact_limit_open' } });
     const purchase = await prisma.leadPurchase.create({ data: { tenantId, professionalId: pro.id, requestId: service.id, costUSD: 5, status: 'paid' } });
     const payment = await prisma.payment.create({ data: { tenantId, payerUserId: proId, amount: '5', method: 'transfer', status: 'under_review', reference: `test-${suffix}` } });
+    await prisma.billingProfile.create({ data: { tenantId, userId: proId, idType: 'ruc', idNumber: '1712345678001', legalName: 'Negocio privado', address: 'Dirección privada', email: 'billing@example.test', phone: '0991234567' } });
+    await prisma.paymentAllocation.create({ data: { tenantId, paymentId: payment.id, leadPurchaseId: purchase.id, subjectId: purchase.id, amount: '5', billingSnapshot: { legalName: 'Negocio privado', email: 'billing@example.test' } } });
     assert.equal((await call('/api/pro/account', 'DELETE', { password: 'incorrecta', confirmation: 'ELIMINAR' })).status, 401);
     assert.equal((await call('/api/pro/account', 'DELETE', { password, confirmation: 'ELIMINAR' })).status, 409);
     await prisma.payment.update({ where: { id: payment.id }, data: { status: 'allocated' } });
@@ -58,6 +60,8 @@ test('professional closure requires password, blocks pending payments and preser
     assert.equal(profile.documentId, null);
     assert.equal(profile.businessName, null);
     assert.deepEqual(profile.portfolioImages, []);
+    assert.equal(await prisma.billingProfile.count({ where: { userId: proId } }), 0);
+    assert.equal((await prisma.paymentAllocation.findUniqueOrThrow({ where: { paymentId: payment.id } })).billingSnapshot, null);
     assert.equal((await prisma.serviceRequest.findUniqueOrThrow({ where: { id: service.id } })).status, 'contact_limit_open');
     assert.equal((await prisma.serviceRequest.findUniqueOrThrow({ where: { id: unpaidService.id } })).status, 'cancelled');
     assert.equal((await prisma.leadPurchase.findUniqueOrThrow({ where: { id: purchase.id } })).status, 'paid');
@@ -69,6 +73,7 @@ test('professional closure requires password, blocks pending payments and preser
     assert.equal(sentMail[0].to, `${proId}@example.test`);
   } finally {
     await new Promise(resolve => server.close(resolve));
+    await prisma.paymentAllocation.deleteMany({ where: { tenantId } });
     await prisma.payment.deleteMany({ where: { tenantId } });
     await prisma.leadPurchase.deleteMany({ where: { tenantId } });
     await prisma.serviceRequest.deleteMany({ where: { tenantId } });

@@ -269,9 +269,9 @@ export function PopularServices() {
                            <div className="absolute inset-0 bg-gradient-to-r from-[#FFCA0C]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                            <div className="relative z-10">
                               <span className="text-[#FFCA0C] text-xs font-bold tracking-widest uppercase mb-2 block">Segundo Paso</span>
-                              <h3 className="text-[22px] font-bold text-gray-900 mb-2">Recibe hasta 4 presupuestos gratis</h3>
+                               <h3 className="text-[22px] font-bold text-gray-900 mb-2">Publica gratis y recibe propuestas</h3>
                               <p className="text-[16px] text-gray-600 leading-relaxed font-medium">
-                                 En pocas horas, recibirás presupuestos personalizados sin compromiso.
+                                  Los profesionales interesados pueden contactarte o enviarte una cotización. No se garantiza cantidad ni plazo de respuesta.
                               </p>
                            </div>
                         </div>

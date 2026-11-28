@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { createSmtpTransport, smtpFrom } from './mail';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
@@ -22,6 +22,9 @@ import { createEmailVerificationToken, verifyEmailVerificationToken } from './em
 import { escapeHtml } from './htmlEscape';
 import { notifyAccountClosed } from './userNotifications';
 import { enqueueNotification, processNotificationOutbox } from './notificationOutbox';
+import { validateBillingDetails } from './billing';
+import { loadReceipt } from './transferReceipt';
+import { renderReceiptPdf } from './receiptPdf';
 
 dotenv.config();
 
@@ -774,7 +777,7 @@ app.get('/api/requests/available', authenticateToken, async (req: AuthRequest, r
     });
 
     const categories = requestingUser.professionalProfile.categories;
-    const filtered = requests.filter(r => canProfessionalAccessRequest(r, requestingUser.id, categories, req.user!.tenantId)
+    const filtered = requests.filter(r => canProfessionalAccessRequest(r, requestingUser.id, categories, req.user!.tenantId, requestingUser.professionalProfile!.serviceZones)
       && r.purchaseCount < purchaseLimitForRequest(r, settingsOf(tenant.settings)));
 
     // Añadir costUSD calculado para que el frontend lo muestre sin lógica de negocio
@@ -822,7 +825,7 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
       res.status(404).json({ error: 'Solicitud no encontrada.' });
       return;
     }
-    if (!canProfessionalAccessRequest(request, requestingUser.id, requestingUser.professionalProfile.categories, req.user!.tenantId)) {
+    if (!canProfessionalAccessRequest(request, requestingUser.id, requestingUser.professionalProfile.categories, req.user!.tenantId, requestingUser.professionalProfile.serviceZones)) {
       res.status(403).json({ error: 'Selecciona este servicio en tu perfil antes de comprar el contacto.' });
       return;
     }
@@ -841,7 +844,7 @@ app.post('/api/leads/pay', authenticateToken, async (req: AuthRequest, res: Resp
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtext(${`${req.user!.tenantId}:${requestId}`}))`;
       const currentRequest = await tx.serviceRequest.findFirst({ where: { id: requestId, tenantId: req.user!.tenantId } });
       if (!currentRequest || !isPurchasableRequest(currentRequest.status)) return { error: 'Solicitud no disponible', statusCode: 409 };
-      if (!canProfessionalAccessRequest(currentRequest, requestingUser.id, requestingUser.professionalProfile!.categories, req.user!.tenantId)) return { error: 'Solicitud no disponible', statusCode: 403 };
+      if (!canProfessionalAccessRequest(currentRequest, requestingUser.id, requestingUser.professionalProfile!.categories, req.user!.tenantId, requestingUser.professionalProfile!.serviceZones)) return { error: 'Solicitud no disponible', statusCode: 403 };
       if (currentRequest.purchaseCount >= purchaseLimitForRequest(currentRequest, tenantSettings)) return { error: 'Cupo de profesionales agotado', statusCode: 409 };
       const existing = await tx.leadPurchase.findUnique({ where: { requestId_professionalId: { requestId, professionalId: realProfId } } });
       if (existing?.status === 'paid') return { error: 'Ya has comprado este contacto', statusCode: 409 };
@@ -1045,6 +1048,48 @@ app.get('/api/leads/unlocked', authenticateToken, async (req: AuthRequest, res: 
   }
 });
 
+async function isProfessionalPayer(userId: string, tenantId: string): Promise<boolean> {
+  const user = await prisma.user.findFirst({ where: { id: userId, tenantId, active: true, role: 'pro' }, select: { professionalProfile: { select: { id: true } } } });
+  if (!user?.professionalProfile) return false;
+  const adminMembership = await prisma.tenantMembership.findUnique({ where: { tenantId_userId: { tenantId, userId } }, select: { status: true } });
+  return adminMembership?.status !== 'active';
+}
+
+app.get('/api/billing/profile', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!await isProfessionalPayer(req.user!.userId, req.user!.tenantId)) { res.status(403).json({ error: 'No autorizado' }); return; }
+    const profile = await prisma.billingProfile.findFirst({ where: { tenantId: req.user!.tenantId, userId: req.user!.userId },
+      select: { idType: true, idNumber: true, legalName: true, address: true, email: true, phone: true } });
+    res.setHeader('Cache-Control', 'no-store').json(profile);
+  } catch (error) { console.error('Error loading billing profile:', error); res.status(500).json({ error: 'No se pudieron cargar los datos de facturación' }); }
+});
+
+app.put('/api/billing/profile', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!await isProfessionalPayer(req.user!.userId, req.user!.tenantId)) { res.status(403).json({ error: 'No autorizado' }); return; }
+    const details = validateBillingDetails(req.body);
+    if (!details) { res.status(400).json({ error: 'Revisa identificación, razón social, dirección, correo y teléfono.' }); return; }
+    const profile = await prisma.billingProfile.upsert({ where: { userId: req.user!.userId },
+      create: { ...details, tenantId: req.user!.tenantId, userId: req.user!.userId }, update: details,
+      select: { idType: true, idNumber: true, legalName: true, address: true, email: true, phone: true } });
+    res.setHeader('Cache-Control', 'no-store').json(profile);
+  } catch (error) { console.error('Error saving billing profile:', error); res.status(500).json({ error: 'No se pudieron guardar los datos de facturación' }); }
+});
+
+app.get('/api/payments/:id/receipt', authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!await isProfessionalPayer(req.user!.userId, req.user!.tenantId)) { res.status(403).json({ error: 'No autorizado' }); return; }
+    const receipt = await loadReceipt(prisma, req.user!.tenantId, req.params.id, req.user!.userId);
+    if (!receipt) { res.status(404).json({ error: 'Recibo no disponible' }); return; }
+    const pdf = await renderReceiptPdf(receipt.rows);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="recibo-${receipt.payment.id}.pdf"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.status(200).send(pdf);
+  } catch (error) { console.error('Error generating receipt:', error); res.status(500).json({ error: 'No se pudo generar el recibo' }); }
+});
+
 /**
  * GET /api/payments/history
  * Historial de todos los pagos realizados por el profesional (para la sección de Facturación).
@@ -1074,7 +1119,9 @@ app.get('/api/payments/history', authenticateToken, async (req: AuthRequest, res
       description: `Contacto: ${a.leadPurchase.request.title}`,
       location: a.leadPurchase.request.location,
       costUSD: p.amount.toNumber(),
-      payphoneTransactionId: p.providerPaymentId || undefined,
+       payphoneTransactionId: p.providerPaymentId || undefined,
+       reference: p.reference,
+       method: p.method,
       requestId: a.leadPurchase.requestId,
     })));
 
@@ -1645,6 +1692,8 @@ app.delete('/api/pro/account', authenticateToken, async (req: AuthRequest, res: 
         data: { verified: false, businessName: null, bio: '', categories: [], serviceZones: [], skills: [],
           city: null, address: null, documentType: null, documentId: null, portfolioImages: [],
           experienceYears: 0, rating: 0, reviewCount: 0, completedJobs: 0 } });
+      await tx.billingProfile.deleteMany({ where: { userId: user.id, tenantId: user.tenantId } });
+      await tx.paymentAllocation.updateMany({ where: { tenantId: user.tenantId, payment: { payerUserId: user.id } }, data: { billingSnapshot: Prisma.DbNull } });
       await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
       await tx.emailVerificationToken.deleteMany({ where: { userId: user.id } });
       await tx.notificationPreference.deleteMany({ where: { userId: user.id } });

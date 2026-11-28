@@ -183,9 +183,19 @@ function Payments({ transfers = false, permissions }: { transfers?: boolean; per
     const url = URL.createObjectURL(await response.blob()); const a = document.createElement('a'); a.href = url; a.download = 'pagos.csv'; a.click(); URL.revokeObjectURL(url);
   };
   return <section><div className="flex flex-wrap items-center justify-between gap-3 mb-5"><h1 className="text-3xl font-bold">{transfers ? 'Transferencias' : 'Todos los pagos'}</h1>{permissions.has('payments.export') && <button onClick={exportCsv} className={button}>Exportar CSV</button>}</div>
+    {transfers && permissions.has('payments.review') && <TransferReviewerRecipients />}
     <div className="flex flex-wrap gap-2 mb-4"><select className={input} value={filter} onChange={e => { setFilter(e.target.value); setPage(1); }}><option value="">Todos los estados</option>{['awaiting_transfer','under_review','approved','allocated','rejected','failed','expired','pending_provider'].map(s => <option key={s} value={s}>{status[s] || s}</option>)}</select><input className={input} placeholder="Buscar referencia" value={reference} onChange={e => { setReference(e.target.value); setPage(1); }} /><input className={input} placeholder="Banco" value={bank} onChange={e => { setBank(e.target.value); setPage(1); }} /><input className={`${input} w-28`} type="number" min="0" placeholder="Monto mín." value={minAmount} onChange={e => { setMinAmount(e.target.value); setPage(1); }} /><input className={`${input} w-28`} type="number" min="0" placeholder="Monto máx." value={maxAmount} onChange={e => { setMaxAmount(e.target.value); setPage(1); }} /><label className="text-xs">Desde<input className={`${input} block`} type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} /></label><label className="text-xs">Hasta<input className={`${input} block`} type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1); }} /></label></div>
     {error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : <><div className="bg-white border rounded-xl overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-gray-50 text-left"><th className="p-3">Referencia</th><th>Pagador</th>{transfers && <><th>Lead</th><th>Banco / Ref. declarada</th><th>Transferencia / Envío</th><th>Revisor</th></>}<th>Monto</th><th>Método</th><th>Estado</th><th>Fecha</th><th></th></tr></thead><tbody>{data?.items.map(p => <tr key={p.id} className="border-t"><td className="p-3 font-mono">{p.reference}</td><td>{p.payer.fullName}</td>{transfers && <><td>{p.leadTitle}</td><td>{p.transfers?.[0] ? `${p.transfers[0].bankName} / ${p.transfers[0].transferReference}` : 'Pendiente'}</td><td>{p.transfers?.[0] ? `${date(p.transfers[0].transferredAt)} / ${date(p.transfers[0].createdAt)}` : '—'}</td><td>{p.transfers?.[0]?.reviewer?.fullName || 'Pendiente'}</td></>}<td>{money(p.amount,p.currency)}</td><td>{p.method}</td><td>{status[p.status] || p.status}</td><td>{date(p.createdAt)}</td><td><button className="underline text-blue-700" onClick={() => setSelected(p.id)}>Detalle</button></td></tr>)}</tbody></table>{!data?.items.length && <p className="p-5">Sin pagos para estos filtros.</p>}</div><Pager page={page} total={data?.total || 0} onPage={setPage} /></>}
   </section>;
+}
+
+function TransferReviewerRecipients() {
+  const { data, error, loading, reload } = useData<{ emails: string[] }>('/payments/reviewers');
+  return <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+    <div className="flex items-center justify-between gap-3"><h2 className="font-bold">Correos que reciben avisos de comprobantes pendientes</h2><button type="button" onClick={reload} className="underline">Actualizar</button></div>
+    {error ? <p role="alert" className="mt-2">No se pudo comprobar quién recibe los avisos: {error}</p> : loading ? <p role="status" className="mt-2">Consultando revisores...</p> : data?.emails.length ? <p className="mt-2 break-words">{data.emails.join(', ')}</p> : <p role="alert" className="mt-2 font-semibold">No hay cuentas activas, con correo verificado y permiso de revisión. Configura un revisor antes de recibir transferencias.</p>}
+    <p className="mt-2 text-xs">Un correo aparece aquí si tiene permiso `payments.review` en este tenant. Su inclusión no confirma entrega SMTP; consulta «Correos fallidos» para incidencias.</p>
+  </div>;
 }
 
 function UnresolvedPayments() {
@@ -354,9 +364,38 @@ function Users({ role, permissions }: { role: 'client' | 'pro' | 'guest'; permis
 }
 
 function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data, error, loading } = useData<{ fullName: string; email: string; phone?: string; role: string; isAdmin: boolean; active: boolean; professionalProfile?: { businessName?: string; bio?: string; categories: string[]; verified: boolean; documentType?: string; documentId?: string }; serviceRequests: Array<{ id: string; title: string; status: string }>; purchases: Array<{ id: string; request: { title: string }; status: string; costUSD: number }>; payments: Array<{ id: string; status: string; amount: string }> }>(`/users/${id}`);
+  const { data, error, loading } = useData<AdminUserDetail>(`/users/${id}`);
   if (data?.role === 'pro' && data.professionalProfile) return <ProfessionalUserDetail data={data as AdminProfessionalDetail} onClose={onClose} />;
-  return <div className="fixed inset-0 bg-black/50 z-50 p-4 overflow-auto" role="dialog" aria-modal="true"><div className="bg-white max-w-2xl mx-auto my-8 p-6 rounded-xl shadow-xl"><button onClick={onClose} className="float-right underline">Cerrar</button><h2 className="text-2xl font-bold mb-4">Perfil</h2>{error && <p className="text-red-600">{error}</p>}{loading ? 'Cargando...' : data && <div className="space-y-4 text-sm"><p><b>{data.fullName}</b> · {data.email} · {data.phone || 'Sin teléfono'} · {data.active ? 'Activo' : 'Suspendido'}</p>{data.professionalProfile && <div><h3 className="font-bold">Profesional</h3><p>{data.professionalProfile.businessName} · {data.professionalProfile.verified ? 'Verificado' : 'Pendiente'}</p><p>{data.professionalProfile.bio}</p><p>Categorías: {data.professionalProfile.categories.join(', ')}</p><p>Documento: {data.professionalProfile.documentType || 'No registrado'} {data.professionalProfile.documentId || ''}</p></div>}{data.role === 'client' && <div><h3 className="font-bold">Solicitudes</h3>{data.serviceRequests.length ? data.serviceRequests.map(r => <p key={r.id}>{r.title} · {r.status}</p>) : <p>Sin solicitudes.</p>}</div>}{data.role === 'pro' && !data.isAdmin && <><div><h3 className="font-bold">Contactos adquiridos</h3>{data.purchases.length ? data.purchases.map(p => <p key={p.id}>{p.request.title} · {p.status} · ${p.costUSD.toFixed(2)}</p>) : <p>Sin contactos adquiridos.</p>}</div><div><h3 className="font-bold">Pagos por contactos</h3>{data.payments.length ? data.payments.map(p => <p key={p.id}>{p.id} · {p.status} · {money(p.amount)}</p>) : <p>Sin pagos.</p>}</div></>}</div>}</div></div>;
+  if (data) return <ClientOrPendingUserDetail data={data} onClose={onClose} />;
+  return <div className="fixed inset-0 z-50 bg-black/60 p-4" role="dialog" aria-modal="true"><div className="mx-auto max-w-xl rounded-xl bg-white p-6"><button type="button" onClick={onClose} className="float-right underline">Cerrar</button><p role={error ? 'alert' : 'status'}>{error || (loading ? 'Cargando detalles...' : 'No se encontró este usuario.')}</p></div></div>;
+}
+
+type AdminUserDetail = Omit<AdminProfessionalDetail, 'professionalProfile'> & {
+  role: string; clientProfile?: { addresses: string[]; preferredCategories: string[] } | null;
+  serviceRequests: Array<{ id: string; title: string; status: string; createdAt: string }>;
+  professionalProfile?: AdminProfessionalDetail['professionalProfile'];
+};
+
+function ClientOrPendingUserDetail({ data, onClose }: { data: AdminUserDetail; onClose: () => void }) {
+  const isClient = data.role === 'client';
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="account-detail-title">
+    <div className="mx-auto my-3 max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl sm:my-8">
+      <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b bg-white p-5 sm:p-6">
+        <div><p className="text-xs font-semibold uppercase text-gray-500">{isClient ? 'Detalle del cliente' : 'Detalle del registro pendiente'}</p><h2 id="account-detail-title" className="mt-1 break-words text-2xl font-bold text-[#101828]">{data.fullName}</h2><p className="mt-2 text-sm text-gray-600">{data.active ? 'Cuenta activa' : 'Cuenta suspendida'} · {isClient ? 'Rol cliente' : 'Rol por completar'}{data.isAdmin ? ' · Cuenta administrativa' : ''}</p></div>
+        <button type="button" onClick={onClose} aria-label="Cerrar detalle" className="rounded-lg p-2 hover:bg-gray-100"><X className="h-5 w-5" /></button>
+      </header>
+      <div className="space-y-5 p-5 sm:p-6">
+        <section className="rounded-xl border p-4 sm:p-5"><h3 className="mb-4 font-bold">Cuenta y contacto</h3><dl className="grid gap-4 sm:grid-cols-2">
+          <DetailValue label="Correo" value={<a className="text-blue-700 underline" href={`mailto:${data.email}`}>{data.email}</a>} />
+          <DetailValue label="Teléfono" value={data.phone ? <a className="text-blue-700 underline" href={`tel:${data.phone}`}>{data.phone}</a> : undefined} />
+          <DetailValue label="Correo verificado" value={data.emailVerified ? 'Sí' : 'No'} />
+          <DetailValue label="Fecha de registro" value={data.createdAt ? date(data.createdAt) : undefined} />
+        </dl></section>
+        {isClient ? <><section className="rounded-xl border p-4 sm:p-5"><h3 className="mb-4 font-bold">Preferencias del cliente</h3><DetailValue label="Categorías preferidas" value={data.clientProfile?.preferredCategories?.length ? data.clientProfile.preferredCategories.join(', ') : undefined} /><div className="mt-4"><DetailValue label="Direcciones guardadas" value={data.clientProfile?.addresses?.length ? data.clientProfile.addresses.join(' · ') : undefined} /></div></section>
+          <section className="rounded-xl border p-4 sm:p-5"><h3 className="mb-3 font-bold">Solicitudes recientes ({data.serviceRequests.length}{data.serviceRequests.length === 20 ? ', máximo mostrado' : ''})</h3>{data.serviceRequests.length ? <ul className="space-y-2">{data.serviceRequests.map(item => <li key={item.id} className="rounded-lg bg-gray-50 p-3 text-sm"><p className="font-semibold">{item.title}</p><p className="text-gray-600">{item.status} · {date(item.createdAt)}</p></li>)}</ul> : <p className="text-sm text-gray-500">Sin solicitudes registradas.</p>}</section></> : <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><h3 className="font-bold">Registro pendiente de completar</h3><p className="mt-2">Esta cuenta todavía no ha elegido el rol de cliente o profesional. No hay perfil de servicios ni solicitudes que mostrar.</p></section>}
+      </div><footer className="border-t bg-gray-50 p-4 text-right"><button type="button" onClick={onClose} className={button}>Cerrar</button></footer>
+    </div>
+  </div>;
 }
 
 type AdminProfessionalDetail = {

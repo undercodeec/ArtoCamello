@@ -70,6 +70,7 @@ model User {
   submittedTransfers TransferSubmission[] @relation("TransferSubmitter")
   reviewedTransfers  TransferSubmission[] @relation("TransferReviewer")
   notificationPreferences NotificationPreference[]
+  billingProfile BillingProfile?
 
   @@index([tenantId, role, createdAt])
 }
@@ -150,6 +151,24 @@ model ProfessionalProfile {
   quotes        Quote[]
 
   @@index([tenantId, verified])
+}
+
+// User-provided receipt details; not a validated SRI invoice identity.
+model BillingProfile {
+  id String @id @default(uuid())
+  tenantId String
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idType String @db.VarChar(12)
+  idNumber String @db.VarChar(32)
+  legalName String @db.VarChar(160)
+  address String @db.VarChar(255)
+  email String @db.VarChar(254)
+  phone String @db.VarChar(40)
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, userId])
 }
 
 // ====================================================================
@@ -318,6 +337,7 @@ model Tenant {
   allocations          PaymentAllocation[]
   events               PaymentEvent[]
   notificationOutbox    NotificationOutbox[]
+  billingProfiles BillingProfile[]
 }
 
 model AdminAccessCode {
@@ -464,6 +484,7 @@ model PaymentAllocation {
   subjectType    String       @default("lead_purchase")
   subjectId      String
   amount         Decimal      @db.Decimal(12, 2)
+  billingSnapshot Json?
 
   @@index([tenantId, subjectType, subjectId])
 }

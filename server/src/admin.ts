@@ -232,6 +232,13 @@ export function adminRouter(db: PrismaClient, secret: string) {
       res.status(409).json({ error: `Pago confirmado en Kushki; requiere resolución manual: ${error.message}` });
     }
   }));
+  router.get('/payments/reviewers', allow('payments.review'), wrap(async (req, res) => {
+    const members = await db.tenantMembership.findMany({ where: {
+      tenantId: req.admin!.tenantId, status: 'active', user: { active: true, emailVerified: true },
+      role: { permissions: { some: { permission: { code: 'payments.review' } } } },
+    }, select: { user: { select: { email: true } } } });
+    res.json({ emails: [...new Set(members.map(member => member.user.email))] });
+  }));
   router.get('/payments/:id', allow('payments.read'), wrap(async (req, res) => {
     const item = await db.payment.findFirst({ where: { id: req.params.id, tenantId: req.admin!.tenantId }, include: {
       payer: { select: { id: true, fullName: true, email: true } }, allocations: true, events: { orderBy: { createdAt: 'desc' } }, transfers: { include: { proofFile: { select: { id: true, checksum: true, mimeType: true } }, reviewer: { select: { fullName: true } } }, orderBy: { createdAt: 'desc' } },

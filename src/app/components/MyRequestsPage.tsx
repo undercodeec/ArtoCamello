@@ -231,7 +231,7 @@ export function MyRequestsPage() {
                     {isActive(request.status) && (
                       <div className="bg-gray-50 rounded-lg p-4 mb-4">
                         <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm font-semibold text-gray-700">Presupuestos recibidos:</span>
+                           <span className="text-sm font-semibold text-gray-700">Cotizaciones recibidas en la plataforma:</span>
                           <span className="text-sm font-bold text-[#101828]">
                             {Math.min(quotes.length, maxProfessionals)} de {maxProfessionals}
                           </span>

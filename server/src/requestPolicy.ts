@@ -21,9 +21,21 @@ export function publicCity(city: string | null): string | null {
   return publicCitiesByNormalizedName.get(city.trim().toLocaleLowerCase('es-EC')) || null;
 }
 
-export function canProfessionalAccessRequest(request: ServiceRequest, professionalUserId: string, professionalCategories: string[], tenantId: string): boolean {
+/** Unknown or sector-only coverage is never inferred from a private address. */
+export function coversRequestCity(city: string | null, serviceZones: string[]): boolean {
+  const requestedCity = publicCity(city);
+  if (!requestedCity || !serviceZones.length) return true;
+  const cities = serviceZones.map(zone => publicCity(zone) || publicCity(zone.split(' - ')[0]));
+  // Legacy/custom zones cannot safely be interpreted as an exclusion.
+  if (cities.some(value => value === null)) return true;
+  return cities.includes(requestedCity);
+}
+
+export function canProfessionalAccessRequest(request: ServiceRequest, professionalUserId: string, professionalCategories: string[], tenantId: string, serviceZones: string[] = []): boolean {
   if (request.tenantId !== tenantId || !hasServiceCategory(professionalCategories, request.categorySlug)) return false;
-  return request.visibility === 'marketplace' || (request.visibility === 'direct' && request.targetProfessionalUserId === professionalUserId);
+  return request.visibility === 'marketplace'
+    ? coversRequestCity(request.city, serviceZones)
+    : request.visibility === 'direct' && request.targetProfessionalUserId === professionalUserId;
 }
 
 export function purchaseLimitForRequest(request: Pick<ServiceRequest, 'visibility'>, settings: TenantSettings): number {
